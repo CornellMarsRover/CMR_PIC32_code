@@ -58,7 +58,7 @@ typedef signed int fix16 ;
 #define FOSC 60E6
 #define PB_DIV 8
 #define PRESCALE 256
-#define T1_TICK (FOSC/PB_DIV/PRESCALE/4)
+#define T1_TICK (FOSC/PB_DIV/PRESCALE*64)
 
 #define CONFIG (CN_ON | CN_IDLE_CON)
 #define PINS (CN15_ENABLE)
@@ -121,11 +121,9 @@ static PT_THREAD(protothread_anim(struct pt *pt)) {
 // external interrupt
 
 void __ISR(_EXTERNAL_0_VECTOR, ipl1) INT0Interrupt(void){
-	//mLED_3_On();//_EXTERNAL_0_Vector
-     tft_writeString("CMR");
-  
-     count++;
-     //printf("External: number of count: %d", count);
+     //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display  
+     count++;    
+     
      // clear interrupt flag
      mINT0ClearIntFlag();
 }
@@ -134,8 +132,12 @@ void __ISR(_TIMER_1_VECTOR, ipl2) Timer1Handler(void) { //empty ISR
 	// Timer interupt to read data
     //sprintf(PT_send_buffer, "%s", "cmd>");
     mPORTAToggleBits(BIT_0);
-    printf("Timer: number of count: %d", count);
-    count = 0;
+    tft_fillRect(0, 0, 50, 50, ILI9340_BLACK);
+    tft_setCursor(0,0);
+    sprintf(buffer,"%d", count);
+    tft_writeString(buffer);       
+    count = 0;    
+    
     mT1ClearIntFlag();//clear interrupt flag, if you forget to do this, the microcontroller will interrupt continuously
 }
 
@@ -150,53 +152,24 @@ void main(void) {
     ANSELA = 0; //make sure analog is cleared
     ANSELB = 0;
     a = 0;
+    count = 0;
     
-    // LED on
+    // LED set up
     mPORTAClearBits(BIT_0);
     mPORTASetPinsDigitalOut(BIT_0);
+    
+    // external interrupt0: 
     mINT0IntEnable(TRUE);
     mINT0SetIntPriority(INT_PRIORITY_LEVEL_1);
-    //mPORTBSetPinsDigitalIn(BIT_7);
-
-    //RPA0R = 1;
-    // RPA0R Interrupt
-    //INT4R = 0x0000;
-    
-    // STEP 1. configure the wait states and peripheral bus clock
-    //SYSTEMConfigWaitStatesAndPB(72000000L);
-    // STEP 2. configure the port registers
-    //ORTSetPinsDigitalOut(IOPORT_A, BIT_0);
-    // STEP 3. initialize the port pin states = outputs low
-    //mPORTAClearBits(BIT_0);
-    // STEP 4. setup the change notice options
-    //mCNOpen(CONFIG, PINS, PULLUPS);
-    // STEP 5. read port(s) to clear mismatch on change notice pins
-    //value = mPORTDRead();
-    // STEP 6. clear change notice interrupt flag
-    //ConfigIntCN(INTERRUPT);
       
     // STEP 1. configure the Timer1
-    //ConfigInt0(EXT_INT_PRI_3|(FALLING_EDGE_INT || RISING_EDGE_INT)|EXT_INT_ENABLE);
-    //ConfigINT0(EXT_INT_PRI_3|(FALLING_EDGE_INT || RISING_EDGE_INT)|EXT_INT_ENABLE);
-    OpenTimer1(T1_ON | T1_SOURCE_INT | T1_PS_1_256, T1_TICK);
+    OpenTimer1(T1_ON | T1_SOURCE_INT | T1_PS_1_256, 39063);
     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // STEP 2. set the timer interrupt to prioirty level 2
     ConfigIntTimer1(T1_INT_ON | T1_INT_PRIOR_2);
     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // STEP 3. enable multi-vector interrupts
     INTEnableSystemMultiVectoredInt();
-    
-    // external interrupt0
-    /*
-    IEC0CLR = 0x00000008;// disable INT0
-    INTCONCLR = 0x00000008;// clear the bit for falling edge trigger
-    IFS0CLR = 0x00000008;// clear the interrupt flag
-    IEC0SET = 0x00000008;// enable INT0
-    */
-    // set up LED
-    //PORTSetPinsDigitalOut(IOPORT_A, BIT_0);
-    
-    //ConfigInt0(EXT_INT_PRI_3|(FALLING_EDGE_INT || RISING_EDGE_INT)|EXT_INT_ENABLE);
    
 //------- uncomment to init the uart2 -----------//
     //UARTConfigure(UART2, UART_ENABLE_PINS_TX_RX_ONLY);
@@ -236,7 +209,7 @@ void main(void) {
     tft_setRotation(0); // Use tft_setRotation(1) for 320x240
     tft_setCursor(0, 0);
 	tft_setTextColor(ILI9340_WHITE);  
-    tft_setTextSize(4);// 
+    tft_setTextSize(1);// 
     //tft_writeString("CMR");
     while(1);
 //---------------------------------------------------------//
@@ -255,7 +228,6 @@ void main(void) {
 //    // round-robin scheduler for threads
 	
     while (1) {
-        //RPA0R = 1;
         PT_SCHEDULE(protothread_uart(&pt_uart));
         //PT_SCHEDULE(protothread_anim(&pt_anim));
     }
