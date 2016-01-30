@@ -45,17 +45,17 @@ OBJECTDIR=build/${CND_CONF}/${IMAGE_TYPE}
 DISTDIR=dist/${CND_CONF}/${IMAGE_TYPE}
 
 # Source Files Quoted if spaced
-SOURCEFILES_QUOTED_IF_SPACED=../glcdfont.c ../tft_gfx.c ../tft_master_spi2.c ../main.c
+SOURCEFILES_QUOTED_IF_SPACED=../glcdfont.c ../tft_gfx.c ../tft_master_spi2.c ../I2CMaster.c
 
 # Object Files Quoted if spaced
-OBJECTFILES_QUOTED_IF_SPACED=${OBJECTDIR}/_ext/1472/glcdfont.o ${OBJECTDIR}/_ext/1472/tft_gfx.o ${OBJECTDIR}/_ext/1472/tft_master_spi2.o ${OBJECTDIR}/_ext/1472/main.o
-POSSIBLE_DEPFILES=${OBJECTDIR}/_ext/1472/glcdfont.o.d ${OBJECTDIR}/_ext/1472/tft_gfx.o.d ${OBJECTDIR}/_ext/1472/tft_master_spi2.o.d ${OBJECTDIR}/_ext/1472/main.o.d
+OBJECTFILES_QUOTED_IF_SPACED=${OBJECTDIR}/_ext/1472/glcdfont.o ${OBJECTDIR}/_ext/1472/tft_gfx.o ${OBJECTDIR}/_ext/1472/tft_master_spi2.o ${OBJECTDIR}/_ext/1472/I2CMaster.o
+POSSIBLE_DEPFILES=${OBJECTDIR}/_ext/1472/glcdfont.o.d ${OBJECTDIR}/_ext/1472/tft_gfx.o.d ${OBJECTDIR}/_ext/1472/tft_master_spi2.o.d ${OBJECTDIR}/_ext/1472/I2CMaster.o.d
 
 # Object Files
-OBJECTFILES=${OBJECTDIR}/_ext/1472/glcdfont.o ${OBJECTDIR}/_ext/1472/tft_gfx.o ${OBJECTDIR}/_ext/1472/tft_master_spi2.o ${OBJECTDIR}/_ext/1472/main.o
+OBJECTFILES=${OBJECTDIR}/_ext/1472/glcdfont.o ${OBJECTDIR}/_ext/1472/tft_gfx.o ${OBJECTDIR}/_ext/1472/tft_master_spi2.o ${OBJECTDIR}/_ext/1472/I2CMaster.o
 
 # Source Files
-SOURCEFILES=../glcdfont.c ../tft_gfx.c ../tft_master_spi2.c ../main.c
+SOURCEFILES=../glcdfont.c ../tft_gfx.c ../tft_master_spi2.c ../I2CMaster.c
 
 
 CFLAGS=
@@ -112,11 +112,11 @@ ${OBJECTDIR}/_ext/1472/tft_master_spi2.o: ../tft_master_spi2.c  nbproject/Makefi
 	@${RM} ${OBJECTDIR}/_ext/1472/tft_master_spi2.o 
 	@${FIXDEPS} "${OBJECTDIR}/_ext/1472/tft_master_spi2.o.d" $(SILENT) -rsi ${MP_CC_DIR}../  -c ${MP_CC}  $(MP_EXTRA_CC_PRE) -g -D__DEBUG -D__MPLAB_DEBUGGER_PK3=1 -fframe-base-loclist  -x c -c -mprocessor=$(MP_PROCESSOR_OPTION)  -O1 -MMD -MF "${OBJECTDIR}/_ext/1472/tft_master_spi2.o.d" -o ${OBJECTDIR}/_ext/1472/tft_master_spi2.o ../tft_master_spi2.c   
 	
-${OBJECTDIR}/_ext/1472/main.o: ../main.c  nbproject/Makefile-${CND_CONF}.mk
+${OBJECTDIR}/_ext/1472/I2CMaster.o: ../I2CMaster.c  nbproject/Makefile-${CND_CONF}.mk
 	@${MKDIR} "${OBJECTDIR}/_ext/1472" 
-	@${RM} ${OBJECTDIR}/_ext/1472/main.o.d 
-	@${RM} ${OBJECTDIR}/_ext/1472/main.o 
-	@${FIXDEPS} "${OBJECTDIR}/_ext/1472/main.o.d" $(SILENT) -rsi ${MP_CC_DIR}../  -c ${MP_CC}  $(MP_EXTRA_CC_PRE) -g -D__DEBUG -D__MPLAB_DEBUGGER_PK3=1 -fframe-base-loclist  -x c -c -mprocessor=$(MP_PROCESSOR_OPTION)  -O1 -MMD -MF "${OBJECTDIR}/_ext/1472/main.o.d" -o ${OBJECTDIR}/_ext/1472/main.o ../main.c   
+	@${RM} ${OBJECTDIR}/_ext/1472/I2CMaster.o.d 
+	@${RM} ${OBJECTDIR}/_ext/1472/I2CMaster.o 
+	@${FIXDEPS} "${OBJECTDIR}/_ext/1472/I2CMaster.o.d" $(SILENT) -rsi ${MP_CC_DIR}../  -c ${MP_CC}  $(MP_EXTRA_CC_PRE) -g -D__DEBUG -D__MPLAB_DEBUGGER_PK3=1 -fframe-base-loclist  -x c -c -mprocessor=$(MP_PROCESSOR_OPTION)  -O1 -MMD -MF "${OBJECTDIR}/_ext/1472/I2CMaster.o.d" -o ${OBJECTDIR}/_ext/1472/I2CMaster.o ../I2CMaster.c   
 	
 else
 ${OBJECTDIR}/_ext/1472/glcdfont.o: ../glcdfont.c  nbproject/Makefile-${CND_CONF}.mk
@@ -137,11 +137,11 @@ ${OBJECTDIR}/_ext/1472/tft_master_spi2.o: ../tft_master_spi2.c  nbproject/Makefi
 	@${RM} ${OBJECTDIR}/_ext/1472/tft_master_spi2.o 
 	@${FIXDEPS} "${OBJECTDIR}/_ext/1472/tft_master_spi2.o.d" $(SILENT) -rsi ${MP_CC_DIR}../  -c ${MP_CC}  $(MP_EXTRA_CC_PRE)  -g -x c -c -mprocessor=$(MP_PROCESSOR_OPTION)  -O1 -MMD -MF "${OBJECTDIR}/_ext/1472/tft_master_spi2.o.d" -o ${OBJECTDIR}/_ext/1472/tft_master_spi2.o ../tft_master_spi2.c   
 	
-${OBJECTDIR}/_ext/1472/main.o: ../main.c  nbproject/Makefile-${CND_CONF}.mk
+${OBJECTDIR}/_ext/1472/I2CMaster.o: ../I2CMaster.c  nbproject/Makefile-${CND_CONF}.mk
 	@${MKDIR} "${OBJECTDIR}/_ext/1472" 
-	@${RM} ${OBJECTDIR}/_ext/1472/main.o.d 
-	@${RM} ${OBJECTDIR}/_ext/1472/main.o 
-	@${FIXDEPS} "${OBJECTDIR}/_ext/1472/main.o.d" $(SILENT) -rsi ${MP_CC_DIR}../  -c ${MP_CC}  $(MP_EXTRA_CC_PRE)  -g -x c -c -mprocessor=$(MP_PROCESSOR_OPTION)  -O1 -MMD -MF "${OBJECTDIR}/_ext/1472/main.o.d" -o ${OBJECTDIR}/_ext/1472/main.o ../main.c   
+	@${RM} ${OBJECTDIR}/_ext/1472/I2CMaster.o.d 
+	@${RM} ${OBJECTDIR}/_ext/1472/I2CMaster.o 
+	@${FIXDEPS} "${OBJECTDIR}/_ext/1472/I2CMaster.o.d" $(SILENT) -rsi ${MP_CC_DIR}../  -c ${MP_CC}  $(MP_EXTRA_CC_PRE)  -g -x c -c -mprocessor=$(MP_PROCESSOR_OPTION)  -O1 -MMD -MF "${OBJECTDIR}/_ext/1472/I2CMaster.o.d" -o ${OBJECTDIR}/_ext/1472/I2CMaster.o ../I2CMaster.c   
 	
 endif
 

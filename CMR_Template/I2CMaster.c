@@ -30,7 +30,7 @@ char buffer[60]; // string buffer
 static char cmd[30];
 static int value;
 static unsigned int rcv; 
-static unsigned int rcv; 
+//static unsigned int rcv; 
 
 // === the fixed point macros ========================================
 typedef signed int fix16 ;
@@ -63,6 +63,32 @@ typedef signed int fix16 ;
 static struct pt pt_uart, pt_pid, pt_anim, pt_input, pt_output, pt_DMA_output, pt_I2C_Master;
 
 
+
+
+static unsigned char temp; //temp received from i2c
+static unsigned char addr = 0x5A;
+
+
+
+/*****************************************************
+ * RcvData(unsigned int address)		     *
+ *					  	     *
+ * Gets a byte of data from I2C slave device at      *
+ *  ADDRESS.					     *
+ *						     *
+ * Returns: Received data			     *
+ ****************************************************/
+int RcvData(unsigned int address) {
+	StartI2C1();				//Send line start condition
+	IdleI2C1();			        //Wait to complete
+	MasterWriteI2C1((address << 1) | 1);	//Write out slave address OR 1 (read command)
+	IdleI2C1();				//Wait to complete
+	rcv = MasterReadI2C1();		//Read in a value   
+    StopI2C1();				//Send line stop condition
+	IdleI2C1();				//Wait co complete
+	return rcv;				//Return read value
+}
+
 //static PT_THREAD(protothread_I2C(struct pt *pt)){
 //    PT_BEGIN(pt);
 //    while(1){
@@ -74,22 +100,30 @@ static struct pt pt_uart, pt_pid, pt_anim, pt_input, pt_output, pt_DMA_output, p
 static PT_THREAD(protothread_uart(struct pt *pt)) {
     // this thread interacts with the PC keyboard to take user input and set up PID parameters
     PT_BEGIN(pt);
-    while (1) {
-        // send the prompt via DMA to serial
+    // send the prompt via DMA to serial
         sprintf(PT_send_buffer, "%s", "cmd>");
         // by spawning a print thread
         PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));//send date and time
+    
+    while (1) {
+        
+        temp = RcvData2(addr);
 
-        //spawn a thread to handle terminal input
-        // the input thread waits for input
-        // -- BUT does NOT block other threads
-        // string is returned in "PT_term_buffer"
-        PT_SPAWN(pt, &pt_input, PT_GetSerialBuffer(&pt_input));//wait for  input
-        sscanf(PT_term_buffer, "%s %f", cmd, &value);
-                         
-        // echo
-        sprintf(PT_send_buffer,"%04x%s", rcv, "\n");//send original message
-        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+        sprintf(PT_send_buffer, "%s%d%s", "Temperature value: " ,temp, "\n\r");
+        // by spawning a print thread
+        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));//send date and time
+
+        
+//        //spawn a thread to handle terminal input
+//        // the input thread waits for input
+//        // -- BUT does NOT block other threads
+//        // string is returned in "PT_term_buffer"
+//        PT_SPAWN(pt, &pt_input, PT_GetSerialBuffer(&pt_input));//wait for  input
+//        sscanf(PT_term_buffer, "%s %f", cmd, &value);
+//                         
+//        // echo
+//        sprintf(PT_send_buffer,"%04x%s", rcv, "\n");//send original message
+//        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
 //        sprintf(PT_send_buffer,"\n");//next line
 //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
 //        sprintf(PT_send_buffer,"\r");//carriage return
@@ -97,7 +131,7 @@ static PT_THREAD(protothread_uart(struct pt *pt)) {
                 
         
        
-        PT_YIELD_TIME_msec(50);
+        PT_YIELD_TIME_msec(500);
     } // while(1)
     PT_END(pt);
 } // uart input thread
@@ -129,11 +163,11 @@ void __ISR(_INPUT_CAPTURE_1_VECTOR, ipl3) C1Handler(void) {//empty ISR
 
 /***************************************************
  * SendData(int data, unsigned int address)        *
- *						    *
+ *                                                 *
  * Sends a byte of data (DATA) over the I2C line   *
- *	to I2C address ADDRESS			    *
- *						    *
- * Returns: nothing				    *
+ *	to I2C address ADDRESS                         *
+ *                                                 *
+ * Returns: nothing                                *
  ***************************************************/
 void SendData (int data, unsigned int address){
 	StartI2C1();	        //Send the Start Bit
@@ -151,24 +185,6 @@ void SendData (int data, unsigned int address){
 } //end function
 
 
-/*****************************************************
- * RcvData(unsigned int address)		     *
- *					  	     *
- * Gets a byte of data from I2C slave device at      *
- *  ADDRESS.					     *
- *						     *
- * Returns: Received data			     *
- ****************************************************/
-int RcvData(unsigned int address) {
-	StartI2C1();				//Send line start condition
-	IdleI2C1();			        //Wait to complete
-	MasterWriteI2C1((address << 1) | 1);	//Write out slave address OR 1 (read command)
-	IdleI2C1();				//Wait to complete
-	rcv = MasterReadI2C1();		//Read in a value   
-    StopI2C1();				//Send line stop condition
-	IdleI2C1();				//Wait co complete
-	return rcv;				//Return read value
-}
 int RcvData2(unsigned int address){
     rcv = 0;
     StartI2C1();				//Send line start condition
@@ -195,11 +211,11 @@ void main(void) {
     OpenI2C1( I2C_EN, BRG_VAL ); 
     unsigned char cmd = 0; //command line 
     unsigned char data = 0; //output data, digital value to be converted
-    unsigned char addr = 0x1C; 
-    
+    //unsigned char addr = 0x1C; 
+    //Thermometer sensor: 5A
     
 //    SendData(0x75, addr);
-    RcvData2(addr);
+    temp = RcvData2(addr);
     
 //    while(1);
 //    delay_ms(5000);
@@ -245,14 +261,14 @@ void main(void) {
     
     
 //------- uncomment to init the uart2 -----------//
-    //UARTConfigure(UART2, UART_ENABLE_PINS_TX_RX_ONLY);
-    //UARTSetLineControl(UART2, UART_DATA_SIZE_8_BITS | UART_PARITY_NONE | UART_STOP_BITS_1);
-    //UARTSetDataRate(UART2, PB_FREQ, BAUDRATE);
-    //UARTEnable(UART2, UART_ENABLE_FLAGS(UART_PERIPHERAL | UART_RX | UART_TX));
-    //ConfigIntUART2(UART_RX_INT_EN | UART_TX_INT_EN | UART_ERR_INT_EN | UART_INT_PR0 | UART_INT_SUB_PR0);
+//    UARTConfigure(UART2, UART_ENABLE_PINS_TX_RX_ONLY);
+//    UARTSetLineControl(UART2, UART_DATA_SIZE_8_BITS | UART_PARITY_NONE | UART_STOP_BITS_1);
+//    UARTSetDataRate(UART2, PB_FREQ, BAUDRATE);
+//    UARTEnable(UART2, UART_ENABLE_FLAGS(UART_PERIPHERAL | UART_RX | UART_TX));
+//    ConfigIntUART2(UART_RX_INT_EN | UART_TX_INT_EN | UART_ERR_INT_EN | UART_INT_PR0 | UART_INT_SUB_PR0);
 
-    // rxchar = 0 ; // a received character
-    // count = 0 ; // count the number of characters
+     //rxchar = 0 ; // a received character
+     //count = 0 ; // count the number of characters
 
 //    // PuTTY
     clrscr();  //clear PuTTY screen
