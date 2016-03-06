@@ -24,7 +24,7 @@ char buffer[60]; // string buffer
 
 #define I2CBAUD 10000 //clock operating at 10kHz
 #define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
-#define I2CAddress 0x1D;
+#define I2CAddress 0x1F;
 
 
 
@@ -54,12 +54,13 @@ static unsigned int CUR_SENSE;
 //BIT5 = M5, BIT4 = M4
 //BIT3 = M3
 
+static unsigned int Bat_Cutoff;
 
 //---I2C Register Addresses---
 
 
 //Config
-#define ADDR_Config  0x00; 
+#define ADDR_Config  0x00 
 /* BIT7(MSB) = CUR_Sense_EN
  * 
  * CUR_Sense_EN - If enabled, PWM duty cycles will be set to 0% when current
@@ -169,75 +170,7 @@ typedef signed int fix16;
 #define PINS (CN15_ENABLE)
 #define PULLUPS (CN_PULLUP_DISABLE_ALL)
 
-//// receive function prototype (see below for code)
-//// int GetDataBuffer(char *buffer, int max_size);
-//
-//// === thread structures ============================================
-//// thread control structs
-static struct pt pt_uart, pt_anim, pt_input, pt_output, pt_DMA_output;
 
-
-
-static PT_THREAD(protothread_uart(struct pt *pt)) {
-    // this thread interacts with the PC keyboard to take user input and set up PID parameters
-    PT_BEGIN(pt);
-    while (1) {
-        // send the prompt via DMA to serial
-        sprintf(PT_send_buffer, "%s", "cmd>");
-        // by spawning a print thread
-        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output)); //send date and time
-        //spawn a thread to handle terminal input
-        // the input thread waits for input
-        // -- BUT does NOT block other threads
-        // string is returned in "PT_term_buffer"
-        PT_SPAWN(pt, &pt_input, PT_GetSerialBuffer(&pt_input)); //wait for  input
-        sscanf(PT_term_buffer, "%s %d", cmd, &value);
-
-        // echo
-
-        //        sprintf(PT_send_buffer,"\n");//next line
-        //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
-        //        sprintf(PT_send_buffer,"\r");//carriage return
-        //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
-
-        switch (cmd[0]) {
-            case 's':
-                RF_PWM = value;
-                break;
-            case 'p':
-                propGain = value;
-                break;
-            case 'i':
-                intGain = value;
-                break;
-            case 'd':
-                diffGain = value;
-                break;
-            default:
-                break;
-        }
-        sprintf(PT_send_buffer, "%s%d%s%d%s%d%s%d%s", "\nspeedTarget:", RF_PWM, "\n\rPropGain: ", propGain, "\n\rIntegral: ", intGain, "\n\rDifferential: ", diffGain, "\n\r"); //send original message
-        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-
-        PT_YIELD_TIME_msec(50);
-    } // while(1)
-    PT_END(pt);
-} // uart input thread
-
-static PT_THREAD(protothread_anim(struct pt *pt)) {
-    // runs the LCD and updates around 5/second
-    PT_BEGIN(pt);
-    while (1) {
-        //write to screen
-        tft_fillRect(0, 0, 160, 120, ILI9340_BLACK);
-        tft_setCursor(0, 0);
-        sprintf(buffer, "%s%d%s%d%s%d%s%d%s%d%s%d%s%d", "PWM:", drive, "\nspeed: ", speed, "\nerror:", error, "\ntarget:", RF_PWM, "\nP:", propGain, "\nI:", intGain, "\nD:", diffGain);
-        tft_writeString(buffer);
-
-        PT_YIELD_TIME_msec(30);
-    }
-    PT_END(pt);
-} // animation thread
 
 // external interrupt
 
@@ -276,6 +209,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
     }
     if (IFS1bits.I2C1BIF) {
         mI2C1BClearIntFlag();
+        
         return;
     }
 
@@ -285,6 +219,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         // perform a dummy read
         temp = SlaveReadI2C1();
         I2C1CONbits.SCLREL = 1; // release the clock
+        I2Cstate = 0;
     } else if ((I2C1STATbits.R_W == 0) && (I2C1STATbits.D_A == 1)) {//data received, input to slave
         // writing data to our module
         I2CDataIn = SlaveReadI2C1();
@@ -297,35 +232,35 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         else if(I2Cstate == 1){
             switch(I2C_request){
                 case ADDR_ALL_PWM:
-                    SetDCOC1PWM(I2CDataIn);
-					SetDCOC2PWM(I2CDataIn);
-					SetDCOC3PWM(I2CDataIn);
-					SetDCOC4PWM(I2CDataIn);
-					SetDCOC5PWM(I2CDataIn);
-					M3_PWM = I2CDataIn;
-					M4_PWM = I2CDataIn;
-					M5_PWM = I2CDataIn;
-					M6_PWM = I2CDataIn;
-					M7_PWM = I2CDataIn;
+                    SetDCOC1PWM(I2CDataIn<<3);
+					SetDCOC2PWM(I2CDataIn<<3);
+					SetDCOC3PWM(I2CDataIn<<3);
+					SetDCOC4PWM(I2CDataIn<<3);
+					SetDCOC5PWM(I2CDataIn<<3);
+					M3_PWM = I2CDataIn<<3;
+					M4_PWM = I2CDataIn<<3;
+					M5_PWM = I2CDataIn<<3;
+					M6_PWM = I2CDataIn<<3;
+					M7_PWM = I2CDataIn<<3;
                     break;
                 case ADDR_M3_PWM :
-					SetDCOC4PWM(M3_PWM);
-                    M3_PWM = I2CDataIn;
+                    M3_PWM = I2CDataIn<<3;
+					SetDCOC4PWM(M3_PWM);                    
                     break;
                 case ADDR_M4_PWM:
-                    M4_PWM = I2CDataIn;
+                    M4_PWM = I2CDataIn<<3;
 					SetDCOC5PWM(M4_PWM);
                     break;
                 case ADDR_M5_PWM:
-					M5_PWM = I2CDataIn;
+					M5_PWM = I2CDataIn<<3;
 					SetDCOC3PWM(M5_PWM);
                     break;                     
                 case ADDR_M6_PWM:
-					M6_PWM = I2CDataIn;
+					M6_PWM = I2CDataIn<<3;
 					SetDCOC2PWM(M6_PWM);
                     break;
                 case ADDR_M7_PWM:
-					M7_PWM = I2CDataIn;
+					M7_PWM = I2CDataIn<<3;
 					SetDCOC1PWM(M7_PWM);
                     break;					
                 case ADDR_DIR:
@@ -361,9 +296,9 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
 					}
                     DIR = I2CDataIn;
                     break;
-                case ADDR_Config1:
-                    config1 = I2CDataIn;
-					if(config1 & 0x40){
+                case ADDR_Config:
+                    config = I2CDataIn;
+					if(config & 0x40){
 						SetDCOC1PWM(0);
 						SetDCOC2PWM(0);
 						SetDCOC3PWM(0);
@@ -380,6 +315,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     break;                   
                 default:
                     break;
+                    
             } 
             I2Cstate = 0;
         }
@@ -454,7 +390,7 @@ void main(void) {
 	RPA1R = 0x05;//output compare 2
 	RPB0R = 0x05;//output compare 3
 	RPB2R = 0x05;//output compare 4
-	RPA2R = 0x07;//output compare 5
+	RPA2R = 0x06;//output compare 5
 	
     
     //mPORTAClearBits(BIT_0);
@@ -471,11 +407,11 @@ void main(void) {
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
 
     // set up OC for PWM
-    ConfigIntOC1(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-	ConfigIntOC2(OC_INT_PRIOR_6 | EXT_INT_SUB_PRI_3);
-    ConfigIntOC3(OC_INT_PRIOR_7 | EXT_INT_SUB_PRI_4);
-    ConfigIntOC4(OC_INT_PRIOR_8 | EXT_INT_SUB_PRI_5);
-    ConfigIntOC5(OC_INT_PRIOR_9 | EXT_INT_SUB_PRI_6);
+    ConfigIntOC1(OC_INT_PRIOR_0 | EXT_INT_SUB_PRI_2);
+	ConfigIntOC2(OC_INT_PRIOR_1 | EXT_INT_SUB_PRI_2);
+    ConfigIntOC3(OC_INT_PRIOR_2 | EXT_INT_SUB_PRI_2);
+    ConfigIntOC4(OC_INT_PRIOR_3 | EXT_INT_SUB_PRI_2);
+    ConfigIntOC5(OC_INT_PRIOR_4 | EXT_INT_SUB_PRI_2);
 
 	
 	
@@ -487,20 +423,13 @@ void main(void) {
 
     
     // init the threads
-    PT_INIT(&pt_uart);
-    PT_INIT(&pt_anim);
-    RF_PWM = 0;
-    propGain = 0;
-    intGain = 0;
-    diffGain = 0;
+
 
     INTEnableSystemMultiVectoredInt();
 
-    
+
     //round robin thread schedule
     while (1) {
-        PT_SCHEDULE(protothread_uart(&pt_uart));
-        PT_SCHEDULE(protothread_anim(&pt_anim));
     }
 } // main
 
