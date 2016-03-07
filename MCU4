@@ -29,7 +29,7 @@ char buffer[60]; // string buffer
 
 
 static unsigned char I2CDataIn;
-static unsigned char config = 0x80;
+static unsigned char config1 = 0x88;
 static unsigned char Status1 = 0xFF;
 static unsigned char Status2 = 0x00;
 static unsigned int M7_PWM;//pin 2
@@ -38,15 +38,6 @@ static unsigned int M5_PWM;//pin 4
 static unsigned int M4_PWM;//pin 9
 static unsigned int M3_PWM;//pin 6
 
-static unsigned int DIR;
-//BIT7(MSB)= M7, BIT6 = M6
-//BIT5 = M5, BIT4 = M4
-//BIT3 = M3
-//M7DIR = pin 16
-//M6DIR = pin 22
-//M5DIR = pin 26
-//M4DIR = pin 25
-//M3DIR = pin 24
 
 
 static unsigned int CUR_SENSE;
@@ -60,7 +51,7 @@ static unsigned int Bat_Cutoff;
 
 
 //Config
-#define ADDR_Config  0x00 
+#define ADDR_Config1  0x00 
 /* BIT7(MSB) = CUR_Sense_EN
  * 
  * CUR_Sense_EN - If enabled, PWM duty cycles will be set to 0% when current
@@ -88,7 +79,7 @@ static unsigned int Bat_Cutoff;
  * for 2 seconds
  * 
  *
- * Default state of config1 = 0x80
+ * Default state of config1 = 0x88
  */
 
 //Read-only
@@ -124,10 +115,7 @@ Default state of register = 0x00
 #define ADDR_M6_PWM 0x13
 #define ADDR_M7_PWM 0x14
 
-#define ADDR_DIR 0x15
-//BIT7(MSB)= M7, BIT6 = M6
-//BIT5 = M5, BIT4 = M4
-//BIT3 = M3
+
 
 //Motor Bank Addresses
 #define ADDR_ALL_PWM 0x20
@@ -170,7 +158,46 @@ typedef signed int fix16;
 #define PINS (CN15_ENABLE)
 #define PULLUPS (CN_PULLUP_DISABLE_ALL)
 
+static struct pt pt_CSense;
 
+static PT_THREAD(protothread_CSense(struct pt *pt)) {
+    PT_BEGIN(pt);
+    while (1) {
+        
+        if (config1 & 0x80) {
+            if (mPORTBReadBits(BIT_3)) {
+                M7_PWM = 0;
+                SetDCOC1PWM(M7_PWM);
+                Status2 |= 0x80;
+            }
+            if (mPORTBReadBits(BIT_1)) {
+                M6_PWM = 0;
+				SetDCOC2PWM(M6_PWM);
+                Status2 |= 0x40;
+            }
+            if (mPORTAReadBits(BIT_3)) {
+                M5_PWM = 0;
+				SetDCOC3PWM(M5_PWM);
+                Status2 |= 0x20;
+            }
+            if (mPORTBReadBits(BIT_4)) {
+                M4_PWM = 0;
+                SetDCOC5PWM(M4_PWM);
+                Status2 |= 0x10;
+            }
+            if (mPORTAReadBits(BIT_4)) {
+                M3_PWM = 0;
+                SetDCOC4PWM(M3_PWM);                    
+                Status2 |= 0x08;
+            }
+            
+        }
+        PT_YIELD_TIME_msec(10);
+
+    }
+    PT_END(pt);
+
+}
 
 // external interrupt
 
@@ -243,62 +270,93 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
 					M6_PWM = I2CDataIn<<3;
 					M7_PWM = I2CDataIn<<3;
                     break;
+
                 case ADDR_M3_PWM :
-                    M3_PWM = I2CDataIn<<3;
-					SetDCOC4PWM(M3_PWM);                    
+
+                    if (((Status2 & 0x08) && (config1 & 0x80)) || (config1 & 0x20)) {
+                        M3_PWM = 0;
+                    }
+                    else{
+                    if (I2CDataIn | 0x80) {
+						mPORTBClearBits(BIT_13);
+                        M3_PWM = ((~I2CDataIn)+1)<<3;
+
+                    } else {
+                        mPORTBSetBits(BIT_13);
+                        M3_PWM = I2CDataIn << 3;
+                    }
+                    }
+                    SetDCOC4PWM(M3_PWM);
                     break;
                 case ADDR_M4_PWM:
-                    M4_PWM = I2CDataIn<<3;
+                    if (((Status2 & 0x10) && (config1 & 0x80)) || (config1 & 0x20)) {
+                        M4_PWM = 0;
+                    }
+                    else{
+                    if (I2CDataIn | 0x80) {
+						mPORTBClearBits(BIT_14);
+                        M4_PWM = ((~I2CDataIn)+1)<<3;
+                        SetDCOC4PWM(M3_PWM);
+
+                    } else {
+                        mPORTBSetBits(BIT_14);
+                        M4_PWM = I2CDataIn << 3;
+                        SetDCOC4PWM(M3_PWM);
+                    }
+                    }
 					SetDCOC5PWM(M4_PWM);
                     break;
                 case ADDR_M5_PWM:
-					M5_PWM = I2CDataIn<<3;
+                    if (((Status2 & 0x20) && (config1 & 0x80)) || (config1 & 0x20)) {
+                        M5_PWM = 0;
+                    }
+                    else{
+                    if (I2CDataIn | 0x80) {
+						mPORTBClearBits(BIT_15);
+                        M5_PWM = ((~I2CDataIn)+1)<<3;
+
+                    } else {
+                        mPORTBSetBits(BIT_15);
+                        M5_PWM = I2CDataIn << 3;
+                    }
+                    }
 					SetDCOC3PWM(M5_PWM);
                     break;                     
-                case ADDR_M6_PWM:
-					M6_PWM = I2CDataIn<<3;
+                case ADDR_M6_PWM:                   
+                    if (((Status2 & 0x40) && (config1 & 0x80)) || (config1 & 0x20)) {
+                        M6_PWM = 0;
+                    }
+                    else{
+                    if (I2CDataIn | 0x80) {
+						mPORTBClearBits(BIT_11);
+                        M6_PWM = ((~I2CDataIn)+1)<<3;
+
+                    } else {
+                        mPORTBSetBits(BIT_11);
+                        M6_PWM = I2CDataIn << 3;
+                    }
+                    }
 					SetDCOC2PWM(M6_PWM);
                     break;
                 case ADDR_M7_PWM:
-					M7_PWM = I2CDataIn<<3;
-					SetDCOC1PWM(M7_PWM);
-                    break;					
-                case ADDR_DIR:
-					if(I2CDataIn & 0x80){
-						mPORTBSetBits(BIT_7);
-					}
-					else{
+                    if (((Status2 & 0x80) && (config1 & 0x80)) || (config1 & 0x20)) {
+                        M7_PWM = 0;
+                    }
+                    else{
+                    if (I2CDataIn | 0x80) {
 						mPORTBClearBits(BIT_7);
-					}
-					if(I2CDataIn & 0x40){
-						mPORTBSetBits(BIT_11);
-					}
-					else{
-						mPORTBClearBits(BIT_11);
-					}
-					if(I2CDataIn & 0x20){
-						mPORTBSetBits(BIT_15);
-					}
-					else{
-						mPORTBClearBits(BIT_15);
-					}
-					if(I2CDataIn & 0x10){
-						mPORTBSetBits(BIT_14);
-					}
-					else{
-						mPORTBClearBits(BIT_14);
-					}
-					if(I2CDataIn & 0x08){
-						mPORTBSetBits(BIT_13);
-					}
-					else{
-						mPORTBClearBits(BIT_13);				
-					}
-                    DIR = I2CDataIn;
-                    break;
-                case ADDR_Config:
-                    config = I2CDataIn;
-					if(config & 0x40){
+                        M7_PWM = ((~I2CDataIn)+1)<<3;
+
+                    } else {
+                        mPORTBSetBits(BIT_7);
+                        M7_PWM = I2CDataIn << 3;
+                    }
+                    }
+					SetDCOC1PWM(M7_PWM);
+                    break;				
+                case ADDR_Config1:
+                    config1 = I2CDataIn;
+					if(config1 & 0x40){
 						SetDCOC1PWM(0);
 						SetDCOC2PWM(0);
 						SetDCOC3PWM(0);
@@ -394,8 +452,9 @@ void main(void) {
 	
     
     //mPORTAClearBits(BIT_0);
+    mPORTASetPinsDigitalIn(BIT_3|BIT_4);//CS5, CS3
+    mPORTBSetPinsDigitalIn(BIT_1|BIT_3|BIT_4);//CS6, CS7, CS4
     
-	
     mPORTASetPinsDigitalOut(BIT_0|BIT_1|BIT_2);//PWMs
     mPORTBSetPinsDigitalOut(BIT_0|BIT_2|BIT_7|BIT_11|BIT_15|BIT_14|BIT_13);//PWMs & DIR
 
@@ -430,6 +489,7 @@ void main(void) {
 
     //round robin thread schedule
     while (1) {
+        PT_SCHEDULE(protothread_CSense(&pt_CSense));
     }
 } // main
 
