@@ -102,6 +102,11 @@ static unsigned char Hum_sense;
  * effort level of motors on the same bank. When bit is cleared: all motors on 
  * bank will halt (note: only half of the rover will stop)
  * 
+ * BIT1 = WHEEL_COUNT
+ * 
+ * WHEEL_COUNT - when bit is set: 6 wheel drive is activated, otherwise 4 wheel 
+ * drive is used
+ * 
  * 
 
 Default state of config1 = 0x8C
@@ -111,7 +116,7 @@ Default state of config1 = 0x8C
 #define ADDR_Status1  0x01
 /*
  * BIT7(MSB) = RF_ENC_STAT
- * BIT6 =RM_ENC_STAT
+ * BIT6 = RM_ENC_STAT
  * BIT5 = RB_ENC_STAT
  * 
  * XX_ENC_STAT - Bit indicates if the encoder for the given motor is
@@ -211,7 +216,7 @@ typedef signed int fix16;
 //
 //// === thread structures ============================================
 //// thread control structs
-static struct pt pt_uart, pt_pid, pt_anim, pt_input, pt_output, pt_DMA_output;
+static struct pt pt_pid, pt_input, pt_output, pt_DMA_output;
 
 static int dir;
 static int lastDir;
@@ -236,6 +241,128 @@ static int RB_propGain;
 static int RB_effort; 
 static int RB_lastSpeed;
 
+static const int ENC_TEST_THRESHOLD = 1000;
+static PT_THREAD(protothread_ENC(struct pt *pt)){
+    PT_BEGIN(pt);
+    while(1){
+        if(!(Status1 & !0x80)){//if encoder already unplugged
+            CNPUB |= 0x02;//pull-up enable
+            PT_YIELD_TIME_msec(1);
+            if(!(PORTB & 0x02)){
+                Status1 |= 0x80;
+            }
+        }
+        if(!(Status1 & !0x40)){//
+            CNPUB |= 0x04;//pull-up enable
+            PT_YIELD_TIME_msec(1);
+            if(!(PORTB & 0x04)){
+                Status1 |= 0x40;
+            }        }
+        if(!(Status1 & !0x20)){
+            CNPUB |= 0x01;
+            PT_YIELD_TIME_msec(1);
+             if(!(PORTB & 0x01)){
+                Status1 |= 0x20;
+            }
+        }
+        
+        if((RF_Speed == 0) && ((RF_PWM > (2000+ENC_TEST_THRESHOLD))||(RF_PWM < (2000-ENC_TEST_THRESHOLD)) )){
+            CNPUB |= 0x02;//pull-up enable
+            PT_YIELD_TIME_msec(1);
+            if(PORTB & 0x02){//if pin pulled high
+                CNPUB &= !0x02;//pull-up disable
+                CNPDB |= 0x02;//pull-down enable
+                PT_YIELD_TIME_msec(1);//leave time for value to settle
+                if(!(PORTB & 0x02)){//if pin pulled low
+                    Status1 &= !0x80;
+                    if((Status1 & 0x20) && ((config1 & 0x02) && (Status1 & 0x40))){//if 
+                        RF_PWM = (RM_PWM + RB_PWM)<<1;//set speed to average of remaining motors
+                    }
+                    else if((config1 & 0x02) && (Status1 & 0x40)){
+                        RF_PWM = RM_PWM;
+                    }
+                    else if((Status1 & 0x20)){
+                        RF_PWM = RB_PWM;
+                    }
+                    else{
+                        RF_PWM = 2000; 
+                    }
+                }              
+            }
+            
+        CNPUB &= !0x02;//
+        CNPDB &= !0x02;//            
+        }
+        if((RM_Speed == 0) && ((RM_PWM > (2000+ENC_TEST_THRESHOLD))||(RM_PWM < (2000-ENC_TEST_THRESHOLD)) && (config1 & 0x02))){
+            CNPUB |= 0x04;//pull-up enable
+            PT_YIELD_TIME_msec(1);//let pin value settle
+            if(PORTB & 0x04){//if pin pulled high
+                CNPUB &= !0x04;//pull-up disable
+                CNPDB |= 0x04;//pull-down enable
+                PT_YIELD_TIME_msec(1);//leave time for value to settle
+                if(!(PORTB & 0x04)){//if pin pulled low
+                    Status1 &= !0x40;
+                    if((Status1 & 0x20) && ( (Status1 & 0x80))){//if 
+                        RM_PWM = (RM_PWM + RB_PWM)<<1;//set speed to average of remaining motors
+                    }
+                    else if((Status1 & 0x20)){
+                        RM_PWM = RB_PWM;
+                    }
+                    else if((Status1 & 0x80)){
+                        RM_PWM = RF_PWM;
+
+                    }
+                    else{
+                        RM_PWM = 2000; 
+                    }
+                }              
+            }
+            
+        CNPUB &= !0x04;//
+        CNPDB &= !0x04;//            
+        }
+        
+        if((RB_Speed == 0) && ((RB_PWM > (2000+ENC_TEST_THRESHOLD))||(RB_PWM < (2000-ENC_TEST_THRESHOLD)) )){
+            CNPUB |= 0x01;//pull-up enable
+            PT_YIELD_TIME_msec(1);//let pin value settle
+            if(PORTB & 0x01){//if pin pulled high
+                CNPUB &= !0x01;//pull-up disable
+                CNPDB |= 0x01;//pull-down enable
+                PT_YIELD_TIME_msec(1);//leave time for value to settle
+                if(!(PORTB & 0x01)){//if pin pulled low
+                    Status1 &= !0x20;
+                    if((Status1 & 0x80) && ( (Status1 & 0x40) && (config1 & 0x02))){//if 
+                        RB_PWM = (RM_PWM + RF_PWM)<<1;//set speed to average of remaining motors
+                    }
+                    else if((Status1 & 0x40)&&(config1 & 0x02)){
+                        RB_PWM = RM_PWM;
+                    }
+                    else if((Status1 & 0x80)){
+                        RB_PWM = RF_PWM;
+
+                    }
+                    else{
+                        RB_PWM = 2000; 
+                    }
+                }              
+            }
+            
+        CNPUB &= !0x01;//
+        CNPDB &= !0x01;//  
+        }
+        
+        
+        
+        
+        
+        SetDCOC1PWM(RF_PWM);
+        SetDCOC3PWM(RB_PWM);
+        SetDCOC4PWM(RM_PWM);
+        
+        PT_YIELD_TIME_msec(20);
+    }   
+    PT_END(pt);
+}
 
 static PT_THREAD(protothread_pid(struct pt *pt)) {
     PT_BEGIN(pt);
@@ -314,69 +441,6 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
     }
     PT_END(pt);
 }
-
-static PT_THREAD(protothread_uart(struct pt *pt)) {
-    // this thread interacts with the PC keyboard to take user input and set up PID parameters
-    PT_BEGIN(pt);
-    while (1) {
-        // send the prompt via DMA to serial
-        sprintf(PT_send_buffer, "%s", "cmd>");
-        // by spawning a print thread
-        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output)); //send date and time
-        //spawn a thread to handle terminal input
-        // the input thread waits for input
-        // -- BUT does NOT block other threads
-        // string is returned in "PT_term_buffer"
-        PT_SPAWN(pt, &pt_input, PT_GetSerialBuffer(&pt_input)); //wait for  input
-        sscanf(PT_term_buffer, "%s %d", cmd, &value);
-
-        // echo
-
-        //        sprintf(PT_send_buffer,"\n");//next line
-        //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
-        //        sprintf(PT_send_buffer,"\r");//carriage return
-        //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
-
-        switch (cmd[0]) {
-            case 's':
-                RF_PWM = value;
-                break;
-            case 'p':
-                propGain = value;
-                break;
-            case 'i':
-                intGain = value;
-                break;
-            case 'd':
-                diffGain = value;
-                break;
-            default:
-                break;
-        }
-        sprintf(PT_send_buffer, "%s%d%s%d%s%d%s%d%s", "\nspeedTarget:", RF_PWM, "\n\rPropGain: ", propGain, "\n\rIntegral: ", intGain, "\n\rDifferential: ", diffGain, "\n\r"); //send original message
-        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-
-        PT_YIELD_TIME_msec(50);
-    } // while(1)
-    PT_END(pt);
-} // uart input thread
-
-static PT_THREAD(protothread_anim(struct pt *pt)) {
-    // runs the LCD and updates around 5/second
-    PT_BEGIN(pt);
-    while (1) {
-        //write to screen
-        tft_fillRect(0, 0, 160, 120, ILI9340_BLACK);
-        tft_setCursor(0, 0);
-        sprintf(buffer, "%s%d%s%d%s%d%s%d%s%d%s%d%s%d", "PWM:", drive, "\nspeed: ", speed, "\nerror:", error, "\ntarget:", RF_PWM, "\nP:", propGain, "\nI:", intGain, "\nD:", diffGain);
-        tft_writeString(buffer);
-
-        PT_YIELD_TIME_msec(30);
-    }
-    PT_END(pt);
-} // animation thread
-
-// external interrupt
 
 void __ISR(_EXTERNAL_1_VECTOR, ipl1) INT1Interrupt(void) {
     //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
@@ -655,41 +719,32 @@ void main(void) {
     OpenOC3(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//RB
     
 
-    
-    
-    
-    
-    
-    
-    
-    // init the threads
-    PT_INIT(&pt_uart);
-    PT_INIT(&pt_anim);
-    PT_INIT(&pt_pid);
     RF_PWM = 0;
     RM_PWM = 0;
     RB_PWM = 0;
     
     //TFT INIT
-    tft_init_hw();
-    tft_begin();
-    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
-    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
-    tft_setCursor(0, 0);
-    tft_setTextColor(ILI9340_WHITE);
-    tft_setTextSize(2); //
-    sprintf(buffer, "%04x", "SPI1CON");
-    tft_writeString(buffer);
+//    tft_init_hw();
+//    tft_begin();
+//    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+//    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
+//    tft_setCursor(0, 0);
+//    tft_setTextColor(ILI9340_WHITE);
+//    tft_setTextSize(2); //
+//    sprintf(buffer, "%04x", "SPI1CON");
+//    tft_writeString(buffer);
     //    mJTAGPortEnable(0);
     INTEnableSystemMultiVectoredInt();
 
     drive = 2000;
     
+    // init the threads
+    PT_INIT(&pt_ENC);
+    PT_INIT(&pt_pid);    
     //round robin thread schedule
     while (1) {
 
-        PT_SCHEDULE(protothread_uart(&pt_uart));
-        PT_SCHEDULE(protothread_anim(&pt_anim));
+        PT_SCHEDULE(protothread_ENC(&pt_ENC));
         PT_SCHEDULE(protothread_pid(&pt_pid));
     }
 } // main
