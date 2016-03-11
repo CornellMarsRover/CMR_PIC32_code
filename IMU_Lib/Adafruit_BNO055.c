@@ -1,4 +1,10 @@
 /***************************************************************************
+ * IMU code translated from Arduino
+ * Designed for AdaFruit BNO055 Breakout
+ * Spring 2016 CMR 
+***************************************************************************/
+
+/***************************************************************************
   This is a library for the BNO055 orientation sensor
 
   Designed specifically to work with the Adafruit BNO055 Breakout.
@@ -16,15 +22,15 @@
 
   MIT license, all text above must be included in any redistribution
  ***************************************************************************/
-
-#if ARDUINO >= 100
- #include "Arduino.h"
-#else
- #include "WProgram.h"
-#endif
-
-#include <math.h>
-#include <limits.h>
+//
+//#if ARDUINO >= 100
+// #include "Arduino.h"
+//#else
+// #include "WProgram.h"
+//#endif
+//
+//#include <math.h>
+//#include <limits.h>
 
 #include "Adafruit_BNO055.h"
 
@@ -52,7 +58,9 @@ Adafruit_BNO055::Adafruit_BNO055(int32_t sensorID, unsigned char address)
     @brief  Sets up the HW
 */
 /**************************************************************************/
-bool Adafruit_BNO055::begin(adafruit_bno055_opmode_t mode)
+
+
+boolean Adafruit_BNO055::begin(adafruit_bno055_opmode_t mode)
 {
   /* Enable I2C */
   // Wire.begin();
@@ -63,7 +71,7 @@ bool Adafruit_BNO055::begin(adafruit_bno055_opmode_t mode)
   unsigned char id = RcvData(BNO055_CHIP_ID_ADDR);
   if(id != BNO055_ID)
   {
-    delay(1000); // hold on for boot
+    delay_ms(1000); // hold on for boot
     id = RcvData(BNO055_CHIP_ID_ADDR);
     if(id != BNO055_ID) {
       return false;  // still not? ok bail
@@ -77,13 +85,13 @@ bool Adafruit_BNO055::begin(adafruit_bno055_opmode_t mode)
   SendData(BNO055_SYS_TRIGGER_ADDR, 0x20);
   while (RcvData(BNO055_CHIP_ID_ADDR) != BNO055_ID)
   {
-    delay(10);
+    delay_ms(10);
   }
-  delay(50);
+  delay_ms(50);
 
   /* Set to normal power mode */
   SendData(BNO055_PWR_MODE_ADDR, POWER_MODE_NORMAL);
-  delay(10);
+  delay_ms(10);
 
   SendData(BNO055_PAGE_ID_ADDR, 0);
 
@@ -100,16 +108,16 @@ bool Adafruit_BNO055::begin(adafruit_bno055_opmode_t mode)
   /* Configure axis mapping (see section 3.4) */
   /*
   SendData(BNO055_AXIS_MAP_CONFIG_ADDR, REMAP_CONFIG_P2); // P0-P7, Default is P1
-  delay(10);
+  delay_ms(10);
   SendData(BNO055_AXIS_MAP_SIGN_ADDR, REMAP_SIGN_P2); // P0-P7, Default is P1
-  delay(10);
+  delay_ms(10);
   */
   
   SendData(BNO055_SYS_TRIGGER_ADDR, 0x0);
-  delay(10);
+  delay_ms(10);
   /* Set the requested operating mode (see section 3.3) */
   setMode(mode);
-  delay(20);
+  delay_ms(20);
 
   return true;
 }
@@ -123,7 +131,7 @@ void Adafruit_BNO055::setMode(adafruit_bno055_opmode_t mode)
 {
   _mode = mode;
   SendData(_mode, BNO055_OPR_MODE_ADDR);
-  delay(30);
+  delay_ms(30);
 }
 
 /**************************************************************************/
@@ -137,17 +145,17 @@ void Adafruit_BNO055::setExtCrystalUse(boolean usextal)
 
   /* Switch to config mode (just in case since this is the default) */
   setMode(OPERATION_MODE_CONFIG);
-  delay(25);
+  delay_ms(25);
   SendData(0, BNO055_PAGE_ID_ADDR);
   if (usextal) {
     SendData(0x80, BNO055_SYS_TRIGGER_ADDR);
   } else {
     SendData(0x00, BNO055_SYS_TRIGGER_ADDR, );
   }
-  delay(10);
+  delay_ms(10);
   /* Set the requested operating mode (see section 3.3) */
   setMode(modeback);
-  delay(20);
+  delay_ms(20);
 }
 
 
@@ -204,7 +212,7 @@ void Adafruit_BNO055::getSystemStatus(unsigned char *system_status, unsigned cha
   if (system_error != 0)
     *system_error     = RcvData(BNO055_SYS_ERR_ADDR);
 
-  delay(200);
+  delay_ms(200);
 }
 
 /**************************************************************************/
@@ -369,7 +377,7 @@ void Adafruit_BNO055::getSensor(sensor_t *sensor)
   sensor->version     = 1;
   sensor->sensor_id   = _sensorID;
   sensor->type        = SENSOR_TYPE_ORIENTATION;
-  sensor->min_delay   = 0;
+  sensor->min_delay_ms   = 0;
   sensor->max_value   = 0.0F;
   sensor->min_value   = 0.0F;
   sensor->resolution  = 0.01F;
@@ -430,7 +438,7 @@ bool Adafruit_BNO055::getSensorOffsets(adafruit_bno055_offsets_t &offsets_type)
     {
         adafruit_bno055_opmode_t lastMode = _mode;
         setMode(OPERATION_MODE_CONFIG);
-        delay(25);
+        delay_ms(25);
 
         offsets_type.accel_offset_x = (RcvData(ACCEL_OFFSET_X_MSB_ADDR) << 8) | (RcvData(ACCEL_OFFSET_X_LSB_ADDR));
         offsets_type.accel_offset_y = (RcvData(ACCEL_OFFSET_Y_MSB_ADDR) << 8) | (RcvData(ACCEL_OFFSET_Y_LSB_ADDR));
@@ -463,7 +471,7 @@ void Adafruit_BNO055::setSensorOffsets(const unsigned char* calibData)
 {
     adafruit_bno055_opmode_t lastMode = _mode;
     setMode(OPERATION_MODE_CONFIG);
-    delay(25);
+    delay_ms(25);
 
     /* A writeLen() would make this much cleaner */
     SendData(ACCEL_OFFSET_X_LSB_ADDR, calibData[0]);
@@ -505,7 +513,7 @@ void Adafruit_BNO055::setSensorOffsets(const adafruit_bno055_offsets_t &offsets_
 {
     adafruit_bno055_opmode_t lastMode = _mode;
     setMode(OPERATION_MODE_CONFIG);
-    delay(25);
+    delay_ms(25);
 
     SendData(ACCEL_OFFSET_X_LSB_ADDR, (offsets_type.accel_offset_x) & 0x0FF);
     SendData(ACCEL_OFFSET_X_MSB_ADDR, (offsets_type.accel_offset_x >> 8) & 0x0FF);
@@ -626,3 +634,4 @@ bool Adafruit_BNO055::readLen(adafruit_bno055_reg_t reg, byte * buffer, unsigned
   /* ToDo: Check for errors! */
   return true;
 }
+
