@@ -20,21 +20,8 @@
 #ifndef __ADAFRUIT_BNO055_H__
 #define __ADAFRUIT_BNO055_H__
 
-#if (ARDUINO >= 100)
- #include "Arduino.h"
-#else
- #include "WProgram.h"
-#endif
-
-#ifdef __AVR_ATtiny85__
- #include <TinyWireM.h>
- #define Wire TinyWireM
-#else
- #include <Wire.h>
-#endif
-
-#include <Adafruit_Sensor.h>
-#include <utility/imumaths.h>
+#include "imumaths.h"
+#include "Adafruit_Sensor.h"
 
 #define BNO055_ADDRESS_A (0x28)
 #define BNO055_ADDRESS_B (0x29)
@@ -58,9 +45,7 @@ typedef struct
     uint16_t mag_radius;
 } adafruit_bno055_offsets_t;
 
-class Adafruit_BNO055 : public Adafruit_Sensor
-{
-  public:
+
     typedef enum
     {
       /* Page id register definition */
@@ -279,17 +264,17 @@ class Adafruit_BNO055 : public Adafruit_Sensor
       VECTOR_GRAVITY       = BNO055_GRAVITY_DATA_X_LSB_ADDR
     } adafruit_vector_type_t;
 
-#ifdef ARDUINO_SAMD_ZERO
-#error "On an arduino Zero, BNO055's ADR pin must be high. Fix that, then delete this line."
-    Adafruit_BNO055 ( int32_t sensorID = -1, uint8_t address = BNO055_ADDRESS_B );
-#else
-    Adafruit_BNO055 ( int32_t sensorID = -1, uint8_t address = BNO055_ADDRESS_A );
-#endif
-    bool  begin               ( adafruit_bno055_opmode_t mode = OPERATION_MODE_NDOF );
+//#ifdef ARDUINO_SAMD_ZERO
+//#error "On an arduino Zero, BNO055's ADR pin must be high. Fix that, then delete this line."
+//    Adafruit_BNO055 ( int32_t sensorID = -1, uint8_t address = BNO055_ADDRESS_B );
+//#else
+//    Adafruit_BNO055 ( int32_t sensorID = -1, uint8_t address = BNO055_ADDRESS_A );
+//#endif
+    //uint8_t  begin            ( OPERATION_MODE_NDOF );
     void  setMode             ( adafruit_bno055_opmode_t mode );
     void  getRevInfo          ( adafruit_bno055_rev_info_t* );
     void  displayRevInfo      ( void );
-    void  setExtCrystalUse    ( boolean usextal );
+    void  setExtCrystalUse    ( int usextal );
     void  getSystemStatus     ( uint8_t *system_status,
                                 uint8_t *self_test_result,
                                 uint8_t *system_error);
@@ -301,24 +286,24 @@ class Adafruit_BNO055 : public Adafruit_Sensor
     int8_t          getTemp   ( void );
 
     /* Adafruit_Sensor implementation */
-    bool  getEvent  ( sensors_event_t* );
+    int  getEvent  ( sensors_event_t* );
     void  getSensor ( sensor_t* );
 
     /* Functions to deal with raw calibration data */
-    bool  getSensorOffsets(uint8_t* calibData);
-    bool  getSensorOffsets(adafruit_bno055_offsets_t &offsets_type);
+    int  getSensorOffsets(uint8_t* calibData);
+    int  getSensorOffsets(adafruit_bno055_offsets_t &offsets_type);
     void  setSensorOffsets(const uint8_t* calibData);
     void  setSensorOffsets(const adafruit_bno055_offsets_t &offsets_type);
-    bool  isFullyCalibrated(void);
+    int  isFullyCalibrated(void);
 
-  private:
-    byte  read8   ( adafruit_bno055_reg_t );
-    bool  readLen ( adafruit_bno055_reg_t, byte* buffer, uint8_t len );
-    bool  write8  ( adafruit_bno055_reg_t, byte value );
+    int  read8   ( adafruit_bno055_reg_t );
+    int  readLen ( adafruit_bno055_reg_t, int* buffer, uint8_t len );
+    int  write8  ( adafruit_bno055_reg_t, int value );
 
     uint8_t _address;
     int32_t _sensorID;
     adafruit_bno055_opmode_t _mode;
-};
+    
+
 
 #endif
