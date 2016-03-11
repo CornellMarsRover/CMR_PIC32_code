@@ -35,13 +35,14 @@
 #include "Adafruit_BNO055.h"
 #include "stdint.h"
 
-char buffer[60]; // string buffer
+char buffer[8]; // string buffer
 
 int32_t id;
 uint8_t _address;
 int32_t _sensorID;
 uint8_t i = 0;
 static unsigned int rcv; 
+static struct pt pt_uart, pt_pid, pt_anim, pt_input, pt_output, pt_DMA_output;
 
 /***************************************************************************
  CONSTRUCTOR
@@ -318,4 +319,35 @@ int readLen(adafruit_bno055_reg_t reg, uint8_t len)
   return 1;
 }
 
-void main(void) {}
+static PT_THREAD(protothread_uart(struct pt *pt)) {
+    // this thread interacts with the PC keyboard to take user input and set up PID parameters
+    PT_BEGIN(pt);
+    while (1) {
+        readLen(8);
+        sprintf(PT_send_buffer,"%s%d%s%d%s%d%s%d%s%d%s%d%s%d%s%d%s", 
+                "W_LSB: ", buffer[0], 
+                "W_MSB: ", buffer[1], 
+                "X_LSB: ", buffer[2], 
+                "X_MSB: ", buffer[3],
+                "Y_LSB: ", buffer[4],
+                "Y_MSB: ", buffer[5],
+                "Z_LSB: ", buffer[6],
+                "Z_MSB: ", buffer[7],"\n\r");//send original message
+        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+       
+        PT_YIELD_TIME_msec(300);
+    } // while(1)
+    PT_END(pt);
+} // uart input thread
+
+void main(void) {
+    PT_setup();
+    PT_INIT(&pt_uart);
+    
+    while(1)
+	{		
+
+        PT_SCHEDULE(protothread_uart(&pt_uart));    
+        
+ 	}
+}
