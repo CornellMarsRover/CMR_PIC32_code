@@ -1,0 +1,515 @@
+/*
+ * File:        MCU3
+ * Author:      Matthew Filipek
+ * Target PIC:  PIC32MX250F128B
+ */
+
+
+
+////////////////////////////////////
+// clock AND protoThreads configure!
+// You MUST check this file!
+#include "config.h"
+#include "pt_cornell_1_2.h"
+#include <plib.h>
+
+////////////////////////////////////
+// graphics libraries
+#include "tft_gfx.h"
+#include "tft_master.h"
+
+char buffer[60]; // string buffer
+//static int speedTarget; // target fan speed
+
+
+#define I2CBAUD 10000 //clock operating at 10kHz
+#define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
+#define I2CAddress 0x1E;
+
+
+
+static unsigned char I2CDataIn;
+static unsigned char config1 = 0x88;
+static unsigned char Status1 = 0xFF;
+static unsigned char Status2;
+static unsigned int M2_PWM;
+static unsigned int M1_PWM;
+static unsigned int Servo1_PWM;
+static unsigned int Servo2_PWM;
+static unsigned int M1_Pot;
+static unsigned int M2_Pot;
+static unsigned int M3_Pot;
+
+static unsigned int CUR_Sense;
+//BIT7(MSB) - Motor2, BIT6(MSB) - Motor1
+
+
+
+
+
+
+static unsigned char Bat_Cutoff; //pin 14
+
+
+//---I2C Register Addresses---
+
+
+//Config
+#define ADDR_Config1  0x00
+/* BIT7(MSB) = CUR_Sense_EN
+ * 
+ * CUR_Sense_EN - If enabled, PWM duty cycles will be set to 0% when current
+ * sense threshold is reached. Status1 reg holds information on which thresholds
+ * have been tripped. To resume normal motor operation, coresponding Status2 
+ * bits must be cleared
+ * 
+ * BIT6 = LowPowerShutoff_EN
+ * 
+ * LowPowerShutoff_EN - If set MCU will halt all motors if low battery signal received
+ * 
+ * BIT5 = MOTOR_HALT
+ * 
+ * MOTOR_HALT - If set, MCU will halt all motors 
+ * 
+ * BIT4 = RAMP_DOWN_EN
+ * 
+ * RAMP_DOWN_EN - MCU will set a maximum speed delta; any speed changes
+ * that exceed this delta will be done gradually rather than
+ * instantaneously
+ *
+ * BIT3 = MCU_TIMEOUT
+ * 
+ * MCU_TIMEOUT - MCU will set all motor efforts to 0 if no command has been received 
+ * for 2 seconds
+ * 
+ *
+ * Default state of config1 = 0x88
+ */
+
+//Read-only
+#define ADDR_Status1  0x01
+/*
+ * BIT7(MSB) = ~BAT_CUTOFF
+ * 
+ * BAT_CUTOFF - Bit indicates the rover's battery is running low, 1 if
+ * nominal, 0 if low
+
+Default state of register = 0xFF
+ */
+
+#define ADDR_Status2  0x02
+/*
+ * BIT7(MSB) = M2_CUR
+ * BIT6 = M1_CUR
+ * 
+ * 
+ * XX_CUR - Current sense threshold has been reached by the specified motor
+ * motor will halt until bit is reset. 1 if threshold is reached
+
+Default state of register = 0x00
+ */
+
+//Motor addresses
+#define ADDR_M1_PWM 0x10
+#define ADDR_M2_PWM 0x11
+#define ADDR_SERVO1_PWM 0x12
+#define ADDR_SERVO2_PWM 0x13
+
+
+
+
+//Motor Bank Addresses
+#define ADDR_ALL_PWM 0x20
+
+//ADC ADDRESSES
+#define ADDR_POT1 0x40
+#define ADDR_POT2 0x41
+#define ADDR_MAG 0x42
+
+//// command array
+static char cmd[30];
+static int value;
+static int count;
+
+// === the fixed point macros ========================================
+typedef signed int fix16;
+#define multfix16(a,b) ((fix16)(((( signed long long)(a))*(( signed long long)(b)))>>16)) //multiply two fixed 16:16
+#define float2fix16(a) ((fix16)((a)*65536.0)) // 2^16
+#define fix2float16(a) ((float)(a)/65536.0)
+#define fix2int16(a)    ((int)((a)>>16))
+#define int2fix16(a)    ((fix16)((a)<<16))
+#define divfix16(a,b) ((fix16)((((signed long long)(a)<<16)/(b))))
+#define sqrtfix16(a) (float2fix16(sqrt(fix2float16(a))))
+#define absfix16(a) abs(a)
+
+// UART parameters
+#define BAUDRATE 9600 // must match PC end
+#define PB_DIVISOR (1 << OSCCONbits.PBDIV) // read the peripheral bus divider, FPBDIV
+#define PB_FREQ SYS_FREQ/PB_DIVISOR // periperhal bus frequency
+
+// useful ASCII/VT100 macros for PuTTY
+#define clrscr() printf( "\x1b[2J")
+#define home()   printf( "\x1b[H")
+#define pcr()    printf( '\r')
+#define crlf     putchar(0x0a); putchar(0x0d);
+#define max_chars 50 // for input buffer
+
+#define FOSC 60E6
+#define PB_DIV 8
+#define PRESCALE 256
+#define T1_TICK (FOSC/PB_DIV/PRESCALE*64)
+
+#define CONFIG (CN_ON | CN_IDLE_CON)
+#define PINS (CN15_ENABLE)
+#define PULLUPS (CN_PULLUP_DISABLE_ALL)
+
+static struct pt pt_ADC, pt_CSense;
+
+static unsigned int POT1;
+static unsigned int POT2;
+static unsigned int MAG; //magnetic sensor
+
+static PT_THREAD(protothread_ADC(struct pt *pt)) {
+    PT_BEGIN(pt);
+    while (1) {
+
+        MAG = ReadADC10(0);
+        POT2 = ReadADC10(1);
+        POT1 = ReadADC10(2);
+        PT_YIELD_TIME_msec(10);
+    }
+    PT_END(pt);
+}
+
+static PT_THREAD(protothread_CSense(struct pt *pt)) {
+    PT_BEGIN(pt);
+    while (1) {
+        if (config1 & 0x80) {
+            if (mPORTBReadBits(BIT_7)) {
+                M1_PWM = 0;
+                SetDCOC1PWM(M1_PWM);
+                Status2 |= 0x40;
+            }
+            if (mPORTBReadBits(BIT_10)) {
+                M2_PWM = 0;
+                SetDCOC3PWM(M2_PWM);
+                Status2 |= 0x80;
+            }
+        }
+        PT_YIELD_TIME_msec(10);
+
+    }
+    PT_END(pt);
+
+}
+
+void __ISR(_EXTERNAL_0_VECTOR, ipl1) INT0Interrupt(void) {
+    //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+    count++;
+
+    // clear interrupt flag
+    mINT0ClearIntFlag();
+}
+
+void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) { //empty ISR
+    mT2ClearIntFlag(); //clear interrupt flag, if you forget to do this, the microcontroller will interrupt continuously
+}
+
+static int I2Cstate = 0;
+static unsigned char I2C_request;
+
+///////////////////////////////////////////////////////////////////
+//
+// Slave I2C interrupt handler
+// This handler is called when a qualifying I2C events occurs
+// this means that as well as Slave events
+// Master and Bus Collision events will also trigger this handler.
+//
+///////////////////////////////////////////////////////////////////
+static char writepointer = 0;
+
+void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
+    unsigned char temp;
+    static unsigned int dIndex;
+
+    // check for MASTER and Bus events and respond accordingly
+    if (IFS1bits.I2C1MIF) {//master interrupt flag
+        mI2C1MClearIntFlag();
+        return;
+    }
+    if (IFS1bits.I2C1BIF) {//bus collision interrupt
+        I2Cstate = 0;
+        I2C_request = 0;
+        mI2C1BClearIntFlag();
+        return;
+    }
+
+    // handle the incoming message
+    if ((I2C1STATbits.R_W == 0) && (I2C1STATbits.D_A == 0)) {
+        // reset any state variables needed by a message sequence
+        // perform a dummy read
+        temp = SlaveReadI2C1();
+        I2C1CONbits.SCLREL = 1; // release the clock
+    } else if ((I2C1STATbits.R_W == 0) && (I2C1STATbits.D_A == 1)) {//data received, input to slave
+        // writing data to our module
+        I2CDataIn = SlaveReadI2C1();
+        I2C1CONbits.SCLREL = 1; // release clock stretch bit
+
+        if (I2Cstate == 0) {
+            I2Cstate = 1;
+            I2C_request = I2CDataIn;
+        } else if (I2Cstate == 1) {
+            switch (I2C_request) {
+                case ADDR_ALL_PWM:
+                    SetDCOC1PWM(I2CDataIn << 3);
+                    SetDCOC3PWM(I2CDataIn << 3);
+                    M1_PWM = I2CDataIn << 3;
+                    M2_PWM = I2CDataIn << 3;
+                    break;
+                case ADDR_M1_PWM:
+                    if (((Status2 & 0x40) && (config1 & 0x80)) || (config1 & 0x20)) {
+                        M1_PWM = 0;
+                    }
+                    else{
+                        if (I2CDataIn | 0x80) {
+                            mPORTBClearBits(BIT_7);
+                            M1_PWM = ((~I2CDataIn) + 1) << 3;
+                        } else {
+                            mPORTBSetBits(BIT_7);
+                            M1_PWM = I2CDataIn << 3;
+                        }
+                    }
+                    SetDCOC1PWM(M1_PWM);
+                    break;
+                case ADDR_M2_PWM:
+                    if (((Status2 & 0x80) && (config1 & 0x80)) || (config1 & 0x20)) {
+                        M2_PWM = 0; 
+                    }
+                    else{
+                    if (I2CDataIn | 0x80) {
+                        mPORTBClearBits(BIT_10);
+                        M2_PWM = ((~I2CDataIn) + 1) << 3;
+
+                    } else {
+                        mPORTBSetBits(BIT_10);
+                        M2_PWM = I2CDataIn << 3;
+                    }
+                    }
+                    SetDCOC3PWM(M2_PWM);
+                    
+                    break;
+                case ADDR_Config1:
+                    config1 = I2CDataIn;
+                    if (config1 & 0x20) {
+                        SetDCOC1PWM(0);
+                        SetDCOC3PWM(0);
+                    } else {
+                        SetDCOC1PWM(M1_PWM);
+                        SetDCOC3PWM(M2_PWM);
+                    }
+                    break;
+                case ADDR_Status2:
+                    Status2 = I2CDataIn;                    
+                break;
+                default:
+                    break;
+
+            }
+            I2Cstate = 0;
+        }
+
+
+    } else if ((I2C1STATbits.R_W == 1) && (I2C1STATbits.D_A == 0)) {
+        // read of the slave device, read the address
+        temp = SlaveReadI2C1();
+        if (I2Cstate == 1) {
+            I2Cstate = 0;
+            switch (I2C_request) {
+                case ADDR_POT1:
+                    SlaveWriteI2C1(POT1 >> 8);
+                    break;
+                case ADDR_POT2:
+                    SlaveWriteI2C1(POT2 >> 8);
+                    break;
+                case ADDR_MAG:
+                    SlaveWriteI2C1(MAG >> 8);
+                    break;
+                case ADDR_Status1:
+                    SlaveWriteI2C1(Status1);
+                    break;
+                case ADDR_Status2:
+                    SlaveWriteI2C1(Status2);
+                    break;
+                default:
+                    SlaveWriteI2C1(0);
+                    I2C_request = 0;
+                    break;
+
+
+
+            }
+        }
+        dIndex = 0;
+    } else if ((I2C1STATbits.R_W == 1) && (I2C1STATbits.D_A == 1)) {
+        // output the data until the MASTER terminates the
+        // transfer with a NACK, continuing reads return 0
+        switch (I2C_request) {
+            case ADDR_POT1:
+                SlaveWriteI2C1(POT1 & 255);
+                break;
+            case ADDR_POT2:
+                SlaveWriteI2C1(POT2 & 255);
+                break;
+            case ADDR_MAG:
+                SlaveWriteI2C1(MAG & 255);
+                break;
+            default:
+                SlaveWriteI2C1(0);
+                I2C_request = 0;
+                break;
+        }
+    }
+    mI2C1SClearIntFlag();
+}
+
+void InitI2C(void) {
+    unsigned char temp;
+
+    CloseI2C1();
+
+    // Enable the I2C module with clock stretching enabled
+    // define a Master BRG of 400kHz although this is not used by the slave
+    OpenI2C1(I2C_ON | I2C_7BIT_ADD | I2C_STR_EN | I2C_SM_DIS, BRG_VAL); //48);
+    //    I2C1BRG = BRG_VAL;
+    //    I2C1CON = 0xD040;
+    //    I2C1CON &= !I2C_SM_EN;
+    //    I2C1CON |= 0x40;
+    // set the address of the slave module
+    I2C1ADD = I2CAddress;
+    I2C1MSK = 0;
+    // I2C1CON |= 0x8000;
+    // configure the interrupt priority for the I2C peripheral
+    mI2C1SetIntPriority(I2C_INT_PRI_3 | I2C_INT_SLAVE);
+
+    // clear pending interrupts and enable I2C interrupts
+    mI2C1SClearIntFlag();
+    EnableIntSI2C1;
+}
+
+// === Main  ======================================================
+
+void main(void) {
+
+
+    // === I2C Init ================
+    InitI2C();
+    ANSELA = 0; //make sure analog is cleared
+    ANSELB = 0;
+    AD1CON2 = 0;
+    mJTAGPortEnable(0);
+
+
+    PT_setup();
+    RPA0R = 0;
+    RPA1R = 0;
+    CM2CON = 0;
+    CVRCON = 0x0000;
+    ANSELA = 0; //make sure analog is cleared
+    ANSELB = 0;
+    count = 0;
+
+    RPB15R = 0x05; //output compare 1, pin 26, M1_PWM
+    RPB14R = 0x05; //output compare 3, pin 25, M2_PWM
+
+
+
+    //mPORTAClearBits(BIT_0);
+
+    //    RB13, RB11
+    mPORTBSetPinsDigitalIn(BIT_13 | BIT_11);
+
+
+
+    mPORTASetPinsDigitalOut(BIT_3); //
+    mPORTBSetPinsDigitalOut(BIT_15 | BIT_14 | BIT_4 | BIT_7 | BIT_10); //
+
+    //B7 is DIR1
+    //B10 is DIR2
+
+    // external interrupt0:
+    mINT0IntEnable(TRUE);
+    mINT0SetIntPriority(INT_PRIORITY_LEVEL_1);
+
+    OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_1, 2000);
+    ConfigIntTimer2(T2_INT_OFF | T2_INT_PRIOR_2);
+
+    //    OpenTimer3(T3_ON | T3_SOURCE_INT | T3_PS_1_1, 60000);//operating freq of servos is ~666 Hz
+    //    ConfigIntTimer3(T3_INT_OFF| T3_INT_PRIOR_3);
+
+    // set up OC for PWM
+    ConfigIntOC1(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
+    ConfigIntOC3(OC_INT_PRIOR_7 | EXT_INT_SUB_PRI_3);
+
+
+    OpenOC1(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 0, 0);
+    OpenOC3(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 0, 0);
+
+
+
+    // the ADC ///////////////////////////////////////
+    // configure and enable the ADC
+    CloseADC10(); // ensure the ADC is off before setting the configuration
+
+    // define setup parameters for OpenADC10
+    // Turn module on | ouput in integer | trigger mode auto | enable autosample
+    // ADC_CLK_AUTO -- Internal counter ends sampling and starts conversion (Auto convert)
+    // ADC_AUTO_SAMPLING_ON -- Sampling begins immediately after last conversion completes; SAMP bit is automatically set
+    // ADC_AUTO_SAMPLING_OFF -- Sampling begins with AcquireADC10();
+#define PARAM1  ADC_FORMAT_INTG16 | ADC_CLK_AUTO | ADC_AUTO_SAMPLING_ON //
+
+    // define setup parameters for OpenADC10
+    // ADC ref external  | disable offset test | enable scan mode | do 1 sample | use single buf | alternate mode off
+    //note samples per int MUST be at least equal to the number of ADC channels you are reading from
+#define PARAM2  ADC_VREF_AVDD_AVSS | ADC_OFFSET_CAL_DISABLE | ADC_SCAN_ON | ADC_SAMPLES_PER_INT_3 | ADC_BUF_16 | ADC_ALT_INPUT_OFF
+    //
+    // Define setup parameters for OpenADC10
+    // use peripherial bus clock | set sample time | set ADC clock divider
+    // ADC_CONV_CLK_Tcy2 means divide CLK_PB by 2 (max speed)
+    // ADC_SAMPLE_TIME_5 seems to work with a source resistance < 1kohm
+#define PARAM3 ADC_CONV_CLK_PB | ADC_SAMPLE_TIME_15 | ADC_CONV_CLK_Tcy2 //ADC_SAMPLE_TIME_15| ADC_CONV_CLK_Tcy2
+
+    // define setup parameters for OpenADC10
+    // set AN4 and  as analog inputs
+#define PARAM4	ENABLE_AN0_ANA|ENABLE_AN1_ANA | ENABLE_AN2_ANA
+
+
+    // define setup parameters for OpenADC10
+    // do not assign channels to scan
+#define PARAM5	SKIP_SCAN_AN3|SKIP_SCAN_AN4|SKIP_SCAN_AN5 | SKIP_SCAN_AN6 | SKIP_SCAN_AN7 | SKIP_SCAN_AN8| SKIP_SCAN_AN9|SKIP_SCAN_AN10|SKIP_SCAN_AN11 | SKIP_SCAN_AN12 | SKIP_SCAN_AN13 | SKIP_SCAN_AN14 | SKIP_SCAN_AN15
+
+    // use ground as neg ref for A | use AN4 for input A     
+    // configure to sample AN4 
+    SetChanADC10(ADC_CH0_NEG_SAMPLEA_NVREF); // configure to sample AN4 
+    OpenADC10(PARAM1, PARAM2, PARAM3, PARAM4, PARAM5); // configure ADC using the parameters defined above
+
+    EnableADC10(); // Enable the ADC 
+
+
+
+    INTEnableSystemMultiVectoredInt();
+    while (!mAD1GetIntFlag()) {
+    } // wait for the first conversion to complete so there will be valid data in ADC result registers
+
+
+    //round robin thread schedule
+    PT_INIT(&pt_ADC);
+    PT_INIT(&pt_CSense);
+    while (1) {
+        PT_SCHEDULE(protothread_ADC(&pt_ADC));
+        PT_SCHEDULE(protothread_CSense(&pt_CSense));
+        //        PT_SCHEDULE(protothread_anim(&pt_anim));
+    }
+} // main
+
+
+// === end  ======================================================

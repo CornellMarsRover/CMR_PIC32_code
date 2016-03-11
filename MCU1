@@ -1,0 +1,648 @@
+/*
+ * File:        MCU1
+ * Author:      Matthew Filipek
+ * Target PIC:  PIC32MX250F128B
+ */
+
+
+
+////////////////////////////////////
+// clock AND protoThreads configure!
+// You MUST check this file!
+#include "config.h"
+#include "pt_cornell_1_2.h"
+#include <plib.h>
+
+////////////////////////////////////
+// graphics libraries
+#include "tft_gfx.h"
+#include "tft_master.h"
+
+char buffer[60]; // string buffer
+//static int speedTarget; // target fan speed
+static int propGain; //   p
+static int intGain; //    i
+static int diffGain; //   d
+static int integral;
+
+static int speed;
+static int lastSpeed;
+static int drive;
+static int error;
+static int IntThresh;
+static int P;
+static int I;
+static int D;
+
+#define I2CBAUD 10000 //clock operating at 10kHz
+#define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
+#define I2CAddress 0x1C;
+
+
+
+static unsigned char I2CDataIn;
+static unsigned char byteReceved;
+static unsigned char config1 = 0x8C;
+static unsigned char Status1 = 0xFF;
+static unsigned int LF_PWM;
+static unsigned char LF_P;
+static unsigned char LF_I;
+static unsigned char LF_D;
+static unsigned int LM_PWM;
+static unsigned char LM_P;
+static unsigned char LM_I;
+static unsigned char LM_D;
+static unsigned int LB_PWM;
+static unsigned char LB_P;
+static unsigned char LB_I;
+static unsigned char LB_D;
+static unsigned char halted;
+
+static unsigned char LF_Speed;
+static unsigned char LM_Speed;
+static unsigned char LB_Speed;
+static unsigned char Bat_lvl;
+static unsigned char Hum_sense;
+
+
+//---I2C Register Addresses---
+
+
+//Config
+#define ADDR_Config1  0x00 
+/* BIT7(MSB) = PID_EN
+ * 
+ * PID_EN - If enabled, PWM addresses represent target speeds, if
+ * disabled, they will be interpreted as duty cycles. Note: in all cases, motor
+ * speed/effort is set with a signed 8-bit number
+ * 
+ * BIT6 = LowPowerShutoff_EN
+ * 
+ * LowPowerShutoff_EN - MCU will halt all motors if low battery signal recieved
+ * 
+ * BIT5 = MOTOR_HALT
+ * 
+ * MOTOR_HALT - MCU will halt all motors
+ * 
+ * BIT4 = RAMP_DOWN_EN
+ * 
+ * RAMP_DOWN_EN - MCU will set a maximum speed delta; any speed changes
+ * that exceed this delta will be done gradually rather than
+ * instantaneously
+ * 
+ * BIT3 = MCU_TIMEOUT_EN
+ * 
+ * MCU_TIMEOUT - MCU will set all motor efforts to 0 if no command has been received 
+ * for 2 seconds
+ * 
+ * BIT2 = ENCODER_DISCONECT_BEHAVIOR
+ * 
+ * ENCODER_DISCONECT_BEHAVIOR - When bit is set: If the encoder for a given 
+ * motor is disconnected, * MCU will set  effort level of motor to average 
+ * effort level of motors on the same bank. When bit is cleared: all motors on 
+ * bank will halt (note: only half of the rover will stop)
+ * 
+ * 
+
+Default state of config1 = 0x8C
+ */
+
+//Read-only
+#define ADDR_Status1  0x01
+/*
+ * BIT7(MSB) = RF_ENC_STAT
+ * BIT6 =RM_ENC_STAT
+ * BIT5 = RB_ENC_STAT
+ * 
+ * XX_ENC_STAT - Bit indicates if the encoder for the given motor is
+ * connected, 1 for connected, 0 for disconnected
+ * 
+ * BIT4 = RF_STALL
+ * BIT3 = RM_STALL
+ * BIT2 = RB_STALL
+ * 
+ * XX_STALL - Bit indicates if the given motor has stalled, i.e. it is
+ * being given a sufficiently high PWM duty cycle, but is still not
+ * moving. This may also indicate an improper connection to the motor. 0
+ * if stalled, 1 if nominal
+ * 
+ * BIT1 = BAT_CUTOFF
+ * 
+ * BAT_CUTOFF - Bit indicates the rover's battery is running low, 1 if
+ * nominal, 0 if low
+
+Default state of register = 0xFF
+ */
+
+
+
+//Motor addresses
+#define ADDR_LF_PWM 0x10 //NOTE, motor speeds are signed, 2s compliment numbers
+#define ADDR_LF_P 0x11
+#define ADDR_LF_I 0x12
+#define ADDR_LF_D 0x13
+#define ADDR_LM_PWM 0x14
+#define ADDR_LM_P 0x15
+#define ADDR_LM_I 0x16
+#define ADDR_LM_D 0x17
+#define ADDR_LB_PWM 0x18
+#define ADDR_LB_P 0x19
+#define ADDR_LB_I 0x1A
+#define ADDR_LB_D 0x1B
+
+//Motor Bank Addresses
+#define ADDR_ALL_PWM 0x20 //NOTE, motor speeds are signed, 2s compliment numbers
+#define ADDR_ALL_P  0x21
+#define ADDR_ALL_I  0x22
+#define ADDR_ALL_D  0x23
+#define ADDR_HALT  0x2F
+
+
+//----Read-only addresses----
+
+#define ADDR_LF_SPEED 0x30 //NOTE, motor speeds are signed, 2s compliment numbers
+#define ADDR_LM_SPEED 0x31
+#define ADDR_LB_SPEED 0x32
+#define ADDR_BAT_LVL 0x33
+#define ADDR_HUM_SENSE 0x34
+
+
+//// command array
+static char cmd[30];
+static int value;
+static int count;
+
+// === the fixed point macros ========================================
+typedef signed int fix16;
+#define multfix16(a,b) ((fix16)(((( signed long long)(a))*(( signed long long)(b)))>>16)) //multiply two fixed 16:16
+#define float2fix16(a) ((fix16)((a)*65536.0)) // 2^16
+#define fix2float16(a) ((float)(a)/65536.0)
+#define fix2int16(a)    ((int)((a)>>16))
+#define int2fix16(a)    ((fix16)((a)<<16))
+#define divfix16(a,b) ((fix16)((((signed long long)(a)<<16)/(b))))
+#define sqrtfix16(a) (float2fix16(sqrt(fix2float16(a))))
+#define absfix16(a) abs(a)
+
+// UART parameters
+#define BAUDRATE 9600 // must match PC end
+#define PB_DIVISOR (1 << OSCCONbits.PBDIV) // read the peripheral bus divider, FPBDIV
+#define PB_FREQ SYS_FREQ/PB_DIVISOR // periperhal bus frequency
+
+// useful ASCII/VT100 macros for PuTTY
+#define clrscr() printf( "\x1b[2J")
+#define home()   printf( "\x1b[H")
+#define pcr()    printf( '\r')
+#define crlf     putchar(0x0a); putchar(0x0d);
+#define max_chars 50 // for input buffer
+
+#define FOSC 60E6
+#define PB_DIV 8
+#define PRESCALE 256
+#define T1_TICK (FOSC/PB_DIV/PRESCALE*64)
+
+#define CONFIG (CN_ON | CN_IDLE_CON)
+#define PINS (CN15_ENABLE)
+#define PULLUPS (CN_PULLUP_DISABLE_ALL)
+
+//// receive function prototype (see below for code)
+//// int GetDataBuffer(char *buffer, int max_size);
+//
+//// === thread structures ============================================
+//// thread control structs
+static struct pt pt_uart, pt_pid, pt_anim, pt_input, pt_output, pt_DMA_output;
+
+static int dir;
+static int lastDir;
+static int pulsesPerPeriod;
+static char rampCount = 5;
+
+static PT_THREAD(protothread_pid(struct pt *pt)) {
+    PT_BEGIN(pt);
+    while (1) {
+        speed = pulsesPerPeriod;
+        
+
+        if (LF_PWM > 0) {
+            error = LF_PWM - speed; // get error from difference
+            
+            if (abs(error) > IntThresh) {
+                integral += error;
+            } else {
+                integral *= 0.9;
+            }
+            if (integral > 400) {
+                integral = 400;
+            }
+            else if (integral < -400) {
+                integral = -400;
+            }
+            P = (error * propGain) >> 2;
+            I = (integral * intGain) >> 5;
+            D = (lastSpeed - speed * diffGain) >> 2;
+            drive += P + I + D;
+            // drive outputs PWM duty cycle
+            if (drive < 2000) {
+                // write 0
+                drive = 2000;
+            } else if (drive > PR2) {
+                drive = PR2 - 1;
+            }
+        }
+         else {
+            
+            
+            if(speed > 0){
+                speed *= -1;
+            }
+                    
+            error = LF_PWM - speed; // get error from difference
+            
+            if (abs(error) > IntThresh) {
+                integral += error;
+            } else {
+                integral *= 0.9;
+            }
+            if (integral < -400) {
+                integral = -400;
+            }
+            else if (integral > 400) {
+                integral = 400;
+            }
+            P = (error * propGain) >> 2;
+            I = (integral * intGain) >> 5;
+            D = (lastSpeed - speed * diffGain) >> 2;
+            drive += P + I + D;
+            // drive outputs PWM duty cycle
+            if (drive > 2000) {
+                // write 0
+                drive = 2000;
+            } else if (drive < 0) {
+                drive = 1;
+            }
+        }
+
+        if (dir != lastDir) {
+            rampCount = 0;
+        }
+
+
+
+
+
+
+        lastSpeed = speed;
+        SetDCOC1PWM(drive);
+        OC1R = drive;
+
+        lastDir = dir;
+        PT_YIELD_TIME_msec(20);
+    }
+    PT_END(pt);
+}
+
+static PT_THREAD(protothread_uart(struct pt *pt)) {
+    // this thread interacts with the PC keyboard to take user input and set up PID parameters
+    PT_BEGIN(pt);
+    while (1) {
+        // send the prompt via DMA to serial
+        sprintf(PT_send_buffer, "%s", "cmd>");
+        // by spawning a print thread
+        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output)); //send date and time
+        //spawn a thread to handle terminal input
+        // the input thread waits for input
+        // -- BUT does NOT block other threads
+        // string is returned in "PT_term_buffer"
+        PT_SPAWN(pt, &pt_input, PT_GetSerialBuffer(&pt_input)); //wait for  input
+        sscanf(PT_term_buffer, "%s %d", cmd, &value);
+
+        // echo
+
+        //        sprintf(PT_send_buffer,"\n");//next line
+        //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+        //        sprintf(PT_send_buffer,"\r");//carriage return
+        //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
+
+        switch (cmd[0]) {
+            case 's':
+                LF_PWM = value;
+                break;
+            case 'p':
+                propGain = value;
+                break;
+            case 'i':
+                intGain = value;
+                break;
+            case 'd':
+                diffGain = value;
+                break;
+            default:
+                break;
+        }
+        sprintf(PT_send_buffer, "%s%d%s%d%s%d%s%d%s", "\nspeedTarget:", LF_PWM, "\n\rPropGain: ", propGain, "\n\rIntegral: ", intGain, "\n\rDifferential: ", diffGain, "\n\r"); //send original message
+        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
+
+        PT_YIELD_TIME_msec(50);
+    } // while(1)
+    PT_END(pt);
+} // uart input thread
+
+static PT_THREAD(protothread_anim(struct pt *pt)) {
+    // runs the LCD and updates around 5/second
+    PT_BEGIN(pt);
+    while (1) {
+        //write to screen
+        tft_fillRect(0, 0, 160, 120, ILI9340_BLACK);
+        tft_setCursor(0, 0);
+        sprintf(buffer, "%s%d%s%d%s%d%s%d%s%d%s%d%s%d", "PWM:", drive, "\nspeed: ", speed, "\nerror:", error, "\ntarget:", LF_PWM, "\nP:", propGain, "\nI:", intGain, "\nD:", diffGain);
+        tft_writeString(buffer);
+
+        PT_YIELD_TIME_msec(30);
+    }
+    PT_END(pt);
+} // animation thread
+
+// external interrupt
+
+void __ISR(_EXTERNAL_0_VECTOR, ipl1) INT0Interrupt(void) {
+    //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+    count++;
+
+    // clear interrupt flag
+    mINT0ClearIntFlag();
+}
+
+void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) { //empty ISR
+    // Timer interupt to read data
+    //sprintf(PT_send_buffer, "%s", "cmd>");
+    //mPORTAToggleBits(BIT_0);
+    /*
+       tft_fillRect(0, 0, 50, 50, ILI9340_BLACK);
+       tft_setCursor(0,0);
+       sprintf(buffer,"%d", count);
+       tft_writeString(buffer);
+       count = 0;
+     */
+    pulsesPerPeriod = count;
+
+
+
+    count = 0;
+    mT2ClearIntFlag(); //clear interrupt flag, if you forget to do this, the microcontroller will interrupt continuously
+}
+
+static int I2Cstate = 0;
+static unsigned char I2C_request;
+
+///////////////////////////////////////////////////////////////////
+//
+// Slave I2C interrupt handler
+// This handler is called when a qualifying I2C events occurs
+// this means that as well as Slave events
+// Master and Bus Collision events will also trigger this handler.
+//
+///////////////////////////////////////////////////////////////////
+
+void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
+    unsigned char temp;
+    static unsigned int dIndex;
+
+    // check for MASTER and Bus events and respond accordingly
+    if (IFS1bits.I2C1MIF) {
+        mI2C1MClearIntFlag();
+        return;
+    }
+    if (IFS1bits.I2C1BIF) {
+        mI2C1BClearIntFlag();
+        return;
+    }
+
+    // handle the incoming message
+    if ((I2C1STATbits.R_W == 0) && (I2C1STATbits.D_A == 0)) {
+        // reset any state variables needed by a message sequence
+        // perform a dummy read
+        temp = SlaveReadI2C1();
+        I2C1CONbits.SCLREL = 1; // release the clock
+    } else if ((I2C1STATbits.R_W == 0) && (I2C1STATbits.D_A == 1)) {//data received, input to slave
+        // writing data to our module
+        I2CDataIn = SlaveReadI2C1();
+        byteReceved = 1;
+        I2C1CONbits.SCLREL = 1; // release clock stretch bit
+        
+        if( I2Cstate == 0 ){
+            I2Cstate = 1;
+            I2C_request = I2CDataIn;
+        }
+        else if(I2Cstate == 1){
+            switch(I2C_request){
+                case ADDR_ALL_PWM:
+                    if((I2CDataIn >> 7)){
+                        LF_PWM = (~I2CDataIn);//bitwise complement
+                        LM_PWM = LF_PWM;
+                        LB_PWM = LF_PWM;
+                    }
+                    else{
+                        LF_PWM = -1*(I2CDataIn);
+                        LM_PWM = LF_PWM;
+                        LB_PWM = LF_PWM;
+                    }
+                    break;
+                case ADDR_ALL_P:
+                    LF_P = I2CDataIn;
+                    LM_P = I2CDataIn;
+                    LB_P = I2CDataIn;
+                    break;
+                case ADDR_ALL_I:
+                    LF_I = I2CDataIn;
+                    LM_I = I2CDataIn;
+                    LB_I = I2CDataIn;
+                    break;
+                case ADDR_ALL_D:
+                    LF_D = I2CDataIn;
+                    LM_D = I2CDataIn;
+                    LB_D = I2CDataIn;
+                    break;                     
+                case ADDR_LF_PWM:
+                    if((I2CDataIn >> 7)){
+                        LF_PWM = (~I2CDataIn);
+                    }
+                    else{
+                        LF_PWM = -1*(I2CDataIn);
+                    }
+                    break;
+                case ADDR_LF_P:
+                    LF_P = I2CDataIn;
+                    break;
+                case ADDR_LF_I:
+                    LF_I = I2CDataIn;
+                    break;
+                case ADDR_LF_D:
+                    LF_D = I2CDataIn; 
+                    break;
+                    
+                case ADDR_LM_PWM:
+                    if((I2CDataIn >> 7)){
+                        LM_PWM = (~I2CDataIn); 
+                    }
+                    else{
+                        LM_PWM = -1*(I2CDataIn);
+                    }
+                    break;
+                case ADDR_LM_P:
+                    LM_P = I2CDataIn;
+                    break;
+                case ADDR_LM_I:
+                    LM_I = I2CDataIn;
+                    break;
+                case ADDR_LM_D:
+                    LM_D = I2CDataIn; 
+                    break;
+                    case ADDR_LB_PWM:
+                    if((I2CDataIn >> 7)){
+                        LB_PWM = (~I2CDataIn); 
+                    }
+                    else{
+                        LB_PWM = -1*(I2CDataIn);
+                    }
+                    break;
+                case ADDR_LB_P:
+                    LB_P = I2CDataIn;
+                    break;
+                case ADDR_LB_I:
+                    LB_I = I2CDataIn;
+                    break;
+                case ADDR_LB_D:
+                    LB_D = I2CDataIn; 
+                    break;
+                case ADDR_Config1:
+                    config1 = I2CDataIn;
+                    break;                   
+                default:
+                    break;
+            
+            } 
+            I2Cstate = 0;
+        }
+        
+        
+    } else if ((I2C1STATbits.R_W == 1) && (I2C1STATbits.D_A == 0)) {
+        // read of the slave device, read the address
+        temp = SlaveReadI2C1();
+        dIndex = 0;
+        SlaveWriteI2C1(0xF6);
+    } else if ((I2C1STATbits.R_W == 1) && (I2C1STATbits.D_A == 1)) {
+        // output the data until the MASTER terminates the
+        // transfer with a NACK, continuing reads return 0
+        if (dIndex == 0) {
+            SlaveWriteI2C1(0x66);
+            dIndex++;
+        } else
+            SlaveWriteI2C1(0);
+
+    }
+
+    mI2C1SClearIntFlag();
+}
+
+void InitI2C(void) {
+    unsigned char temp;
+
+    CloseI2C1();
+    
+    // Enable the I2C module with clock stretching enabled
+    // define a Master BRG of 400kHz although this is not used by the slave
+    OpenI2C1(I2C_ON | I2C_7BIT_ADD | I2C_STR_EN|I2C_SM_DIS, BRG_VAL); //48);
+//    I2C1BRG = BRG_VAL;
+//    I2C1CON = 0xD040;
+//    I2C1CON &= !I2C_SM_EN;
+//    I2C1CON |= 0x40;
+    // set the address of the slave module
+    I2C1ADD = I2CAddress;
+    I2C1MSK = 0;
+    // I2C1CON |= 0x8000;
+    // configure the interrupt priority for the I2C peripheral
+    mI2C1SetIntPriority(I2C_INT_PRI_3 | I2C_INT_SLAVE);
+
+    // clear pending interrupts and enable I2C interrupts
+    mI2C1SClearIntFlag();
+    EnableIntSI2C1;
+}
+
+// === Main  ======================================================
+
+void main(void) {
+
+
+    // === I2C Init ================
+    InitI2C();
+    ANSELA = 0; //make sure analog is cleared
+    ANSELB = 0;
+    AD1CON2 = 0;
+    mJTAGPortEnable(0);
+    
+    
+    PT_setup();
+    RPA0R = 0;
+    RPA1R = 0;
+    CM2CON = 0;
+    CVRCON = 0x0000;
+    ANSELA = 0; //make sure analog is cleared
+    ANSELB = 0;
+    count = 0;
+    
+    RPB2R = 0x05;  // OC 4
+    RPB3R = 0x05;  // OC 2
+    RPA2R = 0x06; // OC 5
+    
+    mPORTASetPinsDigitalOut(BIT_0);
+
+    // external interrupt0:
+    mINT0IntEnable(TRUE);
+    mINT0SetIntPriority(INT_PRIORITY_LEVEL_1);
+
+    OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_256, 4000);
+    ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
+
+    // set up OC for PWM
+    CloseOC2();
+    ConfigIntOC2(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
+    OpenOC2(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LF pin 6
+    ConfigIntOC4(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
+    OpenOC4(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LM pin 7
+    ConfigIntOC5(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
+    OpenOC5(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LB pin 9
+
+    
+    // init the threads
+    PT_INIT(&pt_uart);
+    PT_INIT(&pt_anim);
+    PT_INIT(&pt_pid);
+    LF_PWM = 0;
+    LM_PWM = 0;
+    LB_PWM = 0;
+    
+    //TFT INIT
+    tft_init_hw();
+    tft_begin();
+    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
+    tft_setCursor(0, 0);
+    tft_setTextColor(ILI9340_WHITE);
+    tft_setTextSize(2); //
+    sprintf(buffer, "%04x", "SPI1CON");
+    tft_writeString(buffer);
+    //    mJTAGPortEnable(0);
+    INTEnableSystemMultiVectoredInt();
+
+    drive = 2000;
+    
+    //round robin thread schedule
+    while (1) {
+
+        PT_SCHEDULE(protothread_uart(&pt_uart));
+        PT_SCHEDULE(protothread_anim(&pt_anim));
+        PT_SCHEDULE(protothread_pid(&pt_pid));
+    }
+} // main
+
+
+// === end  ======================================================

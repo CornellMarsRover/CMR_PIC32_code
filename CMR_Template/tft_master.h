@@ -39,8 +39,8 @@
 #define _rst_high() {LATBSET = 4;}
 #define _rst_low()  {LATBCLR = 4;}
 
-#define ILI9340_TFTWIDTH  128
-#define ILI9340_TFTHEIGHT 160
+#define ILI9340_TFTWIDTH  240
+#define ILI9340_TFTHEIGHT 320
 
 #define ILI9340_NOP     0x00
 #define ILI9340_SWRESET 0x01
