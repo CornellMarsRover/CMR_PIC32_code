@@ -20,7 +20,7 @@
 #ifndef __ADAFRUIT_BNO055_H__
 #define __ADAFRUIT_BNO055_H__
 
-#include "imumaths.h"
+//#include "imumaths.h"
 #include "Adafruit_Sensor.h"
 
 #define BNO055_ADDRESS_A (0x28)
@@ -281,8 +281,8 @@ typedef struct
     void  displaySystemStatus ( void );
     void  getCalibration      ( uint8_t* system, uint8_t* gyro, uint8_t* accel, uint8_t* mag);
 
-    imu::Vector<3>  getVector ( adafruit_vector_type_t vector_type );
-    imu::Quaternion getQuat   ( void );
+    //imu::Vector<3>  getVector ( adafruit_vector_type_t vector_type );
+    //imu::Quaternion getQuat   ( void );
     int8_t          getTemp   ( void );
 
     /* Adafruit_Sensor implementation */
@@ -291,13 +291,13 @@ typedef struct
 
     /* Functions to deal with raw calibration data */
     int  getSensorOffsets(uint8_t* calibData);
-    int  getSensorOffsets(adafruit_bno055_offsets_t &offsets_type);
+    //int  getSensorOffsets(adafruit_bno055_offsets_t &offsets_type);
     void  setSensorOffsets(const uint8_t* calibData);
-    void  setSensorOffsets(const adafruit_bno055_offsets_t &offsets_type);
+    //void  setSensorOffsets(const adafruit_bno055_offsets_t &offsets_type);
     int  isFullyCalibrated(void);
 
     int  read8   ( adafruit_bno055_reg_t );
-    int  readLen ( adafruit_bno055_reg_t, int* buffer, uint8_t len );
+    int  readLen ( uint8_t len );
     int  write8  ( adafruit_bno055_reg_t, int value );
 
     uint8_t _address;
