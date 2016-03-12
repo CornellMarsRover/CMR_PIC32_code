@@ -405,7 +405,7 @@ void InitI2C(void) {
     
     // Enable the I2C module with clock stretching enabled
     // define a Master BRG of 400kHz although this is not used by the slave
-    OpenI2C1(I2C_ON | I2C_7BIT_ADD | I2C_STR_EN|I2C_SM_DIS, BRG_VAL); //48);
+    OpenI2C1(I2C_SLW_DIS | I2C_ON | I2C_7BIT_ADD | I2C_STR_EN|I2C_SM_DIS, BRG_VAL); //48);
 //    I2C1BRG = BRG_VAL;
 //    I2C1CON = 0xD040;
 //    I2C1CON &= !I2C_SM_EN;
@@ -425,7 +425,7 @@ void InitI2C(void) {
 // === Main  ======================================================
 
 void main(void) {
-
+    SYSTEMConfigPerformance(sys_clock);//clock CPU at 40MHz
 
     // === I2C Init ================
     InitI2C();
