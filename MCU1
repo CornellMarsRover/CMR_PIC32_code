@@ -70,6 +70,7 @@ static unsigned char Hum_sense;
 
 //Config
 #define ADDR_Config1  0x00 
+#define PID_EN 0x80
 /* BIT7(MSB) = PID_EN
  * 
  * PID_EN - If enabled, PWM addresses represent target speeds, if
@@ -95,31 +96,27 @@ static unsigned char Hum_sense;
  * MCU_TIMEOUT - MCU will set all motor efforts to 0 if no command has been received 
  * for 2 seconds
  * 
- * BIT2 = ENCODER_DISCONECT_BEHAVIOR
+ * BIT2 = 6_WHEEL_EN
  * 
- * ENCODER_DISCONECT_BEHAVIOR - When bit is set: If the encoder for a given 
- * motor is disconnected, * MCU will set  effort level of motor to average 
- * effort level of motors on the same bank. When bit is cleared: all motors on 
- * bank will halt (note: only half of the rover will stop)
+ * 6_WHEEL_EN - when bit is set, all 6 wheels are used, otherwise only 4 are in use
  * 
- * 
-
-Default state of config1 = 0x8C
+ * Default state of config1 = 0x8C
  */
+#define SIX_WHEEL_EN    0x02
 
 //Read-only
 #define ADDR_Status1  0x01
 /*
- * BIT7(MSB) = RF_ENC_STAT
- * BIT6 =RM_ENC_STAT
- * BIT5 = RB_ENC_STAT
+ * BIT7(MSB) = LF_ENC_STAT
+ * BIT6 =LM_ENC_STAT
+ * BIT5 = LB_ENC_STAT
  * 
  * XX_ENC_STAT - Bit indicates if the encoder for the given motor is
  * connected, 1 for connected, 0 for disconnected
  * 
- * BIT4 = RF_STALL
- * BIT3 = RM_STALL
- * BIT2 = RB_STALL
+ * BIT4 = LF_STALL
+ * BIT3 = LM_STALL
+ * BIT2 = LB_STALL
  * 
  * XX_STALL - Bit indicates if the given motor has stalled, i.e. it is
  * being given a sufficiently high PWM duty cycle, but is still not
@@ -133,7 +130,9 @@ Default state of config1 = 0x8C
 
 Default state of register = 0xFF
  */
-
+#define LF_ENC_STAT 0x80
+#define LM_ENC_STAT 0x40
+#define LB_ENC_STAT 0x20
 
 
 //Motor addresses
@@ -204,12 +203,225 @@ typedef signed int fix16;
 #define PINS (CN15_ENABLE)
 #define PULLUPS (CN_PULLUP_DISABLE_ALL)
 
+#define LF_ENC_MASK 0x08
+#define LM_ENC_MASK 0x10
+#define LB_ENC_MASK 0x10
+
+static int LF_error;
+static int LF_integral;
+static int LF_diffGain;
+static int LF_propGain;
+static int LF_effort;
+static int LF_lastSpeed;
+static int LM_error;
+static int LM_integral;
+static int LM_diffGain;
+static int LM_propGain;
+static int LM_effort;
+static int LM_lastSpeed;
+static int LB_error;
+static int LB_integral;
+static int LB_diffGain;
+static int LB_propGain;
+static int LB_effort;
+static int LB_lastSpeed;
+static int count_LF;
+static int count_LM;
+static int count_LB;
+
 //// receive function prototype (see below for code)
 //// int GetDataBuffer(char *buffer, int max_size);
 //
 //// === thread structures ============================================
 //// thread control structs
-static struct pt pt_uart, pt_pid, pt_anim, pt_input, pt_output, pt_DMA_output;
+static struct pt pt_uart, pt_pid, pt_anim, pt_input, pt_output, pt_DMA_output, pt_ENC;
+
+
+static int ENC_TEST_THRESHOLD = 1000;
+static PT_THREAD(protothread_ENC(struct pt *pt)){
+    PT_BEGIN(pt);
+    while(1){
+        if (!(Status1 & LF_ENC_STAT)) {//if encoder already unplugged
+            if ((Status1 & LB_ENC_STAT) && ((config1 & SIX_WHEEL_EN) && (Status1 & LM_ENC_STAT))) {//if 
+                LF_effort = (LM_effort + LB_effort) >> 1; //set speed to average of remaining motors
+            } else if ((config1 & SIX_WHEEL_EN) && (Status1 & LM_ENC_STAT)) {
+                LF_effort = LM_effort;
+            } else if ((Status1 & LB_ENC_STAT)) {
+                LF_effort = LB_effort;
+            } else {
+                LF_effort = 2000;
+            }
+
+            CNPUA |= LF_ENC_MASK; //pull-up enable
+            CNPDA &= !LF_ENC_MASK;
+            PT_YIELD_TIME_msec(1);
+            if (!(PORTA & LF_ENC_MASK)) {//if not pulled high
+                Status1 |= LF_ENC_STAT;
+                CNPUA &= !LF_ENC_MASK;
+            } else {
+                CNPDA |= LF_ENC_MASK; //pull-down
+                CNPUA &= !LF_ENC_MASK;
+                PT_YIELD_TIME_msec(1);
+                if (PORTA & LF_ENC_MASK) {
+                    Status1 |= LF_ENC_STAT;
+                    CNPDA &= !LF_ENC_MASK;
+                }
+
+            }
+        }
+        if (!(Status1 & LM_ENC_STAT)) {//if encoder already unplugged
+            if ((Status1 & LF_ENC_STAT) && ((Status1 & LB_ENC_STAT))) {//if 
+                LM_effort = (LM_effort + LB_effort) >> 1; //set speed to average of remaining motors
+            } else if ((Status1 & LB_ENC_STAT)) {
+                LM_effort = LB_effort;
+            } else if ((Status1 & LF_ENC_STAT)) {
+                LM_effort = LF_effort;
+
+            } else {
+                LM_effort = 2000;
+            }
+
+            CNPUB |= LM_ENC_MASK; //pull-up enable
+            CNPDB &= !LM_ENC_MASK;
+            PT_YIELD_TIME_msec(1);
+            if (!(PORTB & LM_ENC_MASK)) {//if not pulled high
+                Status1 |= LM_ENC_STAT;
+                CNPUB &= !LM_ENC_MASK;
+            } else {
+                CNPDB |= LM_ENC_MASK; //pull-down
+                CNPUB &= !LM_ENC_MASK;
+                PT_YIELD_TIME_msec(1);
+                if (PORTB & LM_ENC_MASK) {
+                    Status1 |= LM_ENC_STAT;
+                    CNPDB &= !LM_ENC_MASK;
+
+                }
+
+            }
+        }
+        if (!(Status1 & LB_ENC_STAT)) {//if encoder already unplugged
+            if ((Status1 & LF_ENC_STAT) && ((Status1 & LM_ENC_STAT) && (config1 & SIX_WHEEL_EN))) {//if 
+                LB_effort = (LM_effort + LF_effort) >> 1; //set speed to average of remaining motors
+            } else if ((Status1 & 0x40)&&(config1 & 0x02)) {
+                LB_effort = LM_effort;
+            } else if ((Status1 & 0x80)) {
+                LB_effort = LF_effort;
+
+            } else {
+                LB_effort = 2000;
+            }
+
+            CNPUA |= LB_ENC_MASK; //pull-up enable
+            CNPDA &= !LB_ENC_MASK;
+            PT_YIELD_TIME_msec(1);
+            if (!(PORTA & LB_ENC_MASK)) {//if not pulled high
+                Status1 |= LB_ENC_STAT;
+                CNPUA &= !LB_ENC_MASK;
+            } else {
+                CNPDA |= LB_ENC_MASK; //pull-down
+                CNPUA &= !LB_ENC_MASK;
+                PT_YIELD_TIME_msec(1);
+                if (PORTA & LB_ENC_MASK) {
+                    Status1 |= LB_ENC_STAT;
+                    CNPDA &= !LB_ENC_MASK;
+
+                }
+
+            }
+        }
+
+        if ((LF_Speed == 0) && ((LF_effort > (2000 + ENC_TEST_THRESHOLD)) || (LF_effort < (2000 - ENC_TEST_THRESHOLD)))) {
+            CNPUA |= LF_ENC_MASK; //pull-up enable
+            CNPDA &= !LF_ENC_MASK;
+            PT_YIELD_TIME_msec(1);
+            if (PORTA & LF_ENC_MASK) {//if pin pulled high
+                CNPUA &= !LF_ENC_MASK; //pull-up disable
+                CNPDA |= LF_ENC_MASK; //pull-down enable
+                PT_YIELD_TIME_msec(1); //leave time for value to settle
+                if (!(PORTA & LF_ENC_MASK)) {//if pin pulled low
+                    Status1 &= !LF_ENC_STAT;
+                    if ((Status1 & LB_ENC_STAT) && ((config1 & SIX_WHEEL_EN) && (Status1 & LM_ENC_STAT))) {//if 
+                        LF_effort = (LM_effort + LB_effort) >> 1; //set speed to average of remaining motors
+                    } else if ((config1 & SIX_WHEEL_EN) && (Status1 & LM_ENC_STAT)) {
+                        LF_effort = LM_effort;
+                    } else if ((Status1 & LB_ENC_STAT)) {
+                        LF_effort = LB_effort;
+                    } else {
+                        LF_effort = 2000;
+                    }
+                }
+            }
+
+            CNPUA &= !LF_ENC_MASK; //
+            CNPDA &= !LF_ENC_MASK; //            
+        }
+        if ((LM_Speed == 0) && ((LM_effort > (2000 + ENC_TEST_THRESHOLD)) || (LM_effort < (2000 - ENC_TEST_THRESHOLD)) && (config1 & SIX_WHEEL_EN))) {
+            CNPUB |= LM_ENC_MASK; //pull-up enable
+            CNPDB &= !LM_ENC_MASK; //pull-up enable
+            PT_YIELD_TIME_msec(1); //let pin value settle
+            if (PORTB & LM_ENC_MASK) {//if pin pulled high
+                CNPUB &= !LM_ENC_MASK; //pull-up disable
+                CNPDB |= LM_ENC_MASK; //pull-down enable
+                PT_YIELD_TIME_msec(1); //leave time for value to settle
+                if (!(PORTB & LM_ENC_MASK)) {//if pin pulled low
+                    Status1 &= !LM_ENC_STAT;
+                    if ((Status1 & LF_ENC_STAT) && ((Status1 & LB_ENC_STAT))) {//if 
+                        LM_effort = (LM_effort + LB_effort) >> 1; //set speed to average of remaining motors
+                    } else if ((Status1 & LB_ENC_STAT)) {
+                        LM_effort = LB_effort;
+                    } else if ((Status1 & LF_ENC_STAT)) {
+                        LM_effort = LF_effort;
+
+                    } else {
+                        LM_effort = 2000;
+                    }
+                }
+            }
+
+            CNPUB &= !LM_ENC_STAT; //
+            CNPDB &= !LM_ENC_STAT; //            
+        }
+
+        if ((LB_Speed == 0) && ((LB_effort > (2000 + ENC_TEST_THRESHOLD)) || (LB_effort < (2000 - ENC_TEST_THRESHOLD)))) {
+            CNPUA |= LB_ENC_MASK; //pull-up enable
+            CNPDA &= !LB_ENC_MASK;
+            PT_YIELD_TIME_msec(1); //let pin value settle
+            if (PORTA & LB_ENC_MASK) {//if pin pulled high
+                CNPUA &= !LB_ENC_MASK; //pull-up disable
+                CNPDA |= LB_ENC_MASK; //pull-down enable
+                PT_YIELD_TIME_msec(1); //leave time for value to settle
+                if (!(PORTA & LB_ENC_MASK)) {//if pin pulled low
+                    Status1 &= !LB_ENC_STAT;
+                    if ((Status1 & LF_ENC_STAT) && ((Status1 & LM_ENC_STAT) && (config1 & SIX_WHEEL_EN))) {//if 
+                        LB_effort = (LM_effort + LF_effort) >> 1; //set speed to average of remaining motors
+                    } else if ((Status1 & LM_ENC_STAT)&&(config1 & SIX_WHEEL_EN)) {
+                        LB_effort = LM_effort;
+                    } else if ((Status1 & LF_ENC_STAT)) {
+                        LB_effort = LF_effort;
+
+                    } else {
+                        LB_effort = 2000;
+                    }
+                }
+            }
+
+            CNPUA &= !LB_ENC_MASK; //
+            CNPDA &= !LB_ENC_MASK; //  
+        }
+
+
+
+
+
+    SetDCOC4PWM(LM_effort);
+    SetDCOC1PWM(LF_effort);
+    SetDCOC5PWM(LB_effort);
+
+        PT_YIELD_TIME_msec(20);
+
+    }
+    PT_END(pt);
+}
 
 static int dir;
 static int lastDir;
@@ -219,70 +431,172 @@ static char rampCount = 5;
 static PT_THREAD(protothread_pid(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-        speed = pulsesPerPeriod;
-        
 
-        if (LF_PWM > 0) {
-            error = LF_PWM - speed; // get error from difference
-            
-            if (abs(error) > IntThresh) {
-                integral += error;
+
+        if (!(Status1 & LF_ENC_STAT)) {//if encoder disconnected, do nothing, latch PWM 
+
+        } else if (LF_PWM > 0) {
+            LF_error = LF_PWM - LF_Speed; // get error from difference
+
+            if (abs(LF_error) > IntThresh) {
+                LF_integral += LF_error;
             } else {
-                integral *= 0.9;
+                LF_integral *= 0.9;
             }
-            if (integral > 400) {
-                integral = 400;
+            if (LF_integral > 400) {
+                LF_integral = 400;
+            } else if (LF_integral < -400) {
+                LF_integral = -400;
             }
-            else if (integral < -400) {
-                integral = -400;
-            }
-            P = (error * propGain) >> 2;
-            I = (integral * intGain) >> 5;
-            D = (lastSpeed - speed * diffGain) >> 2;
-            drive += P + I + D;
+            LF_effort += ((LF_error * LF_P) >> 2) +((LF_integral * LF_I) >> 5) + (((LF_lastSpeed - LF_Speed) * LF_D) >> 2);
+
             // drive outputs PWM duty cycle
-            if (drive < 2000) {
+            if (LF_effort < 2000) {
                 // write 0
-                drive = 2000;
-            } else if (drive > PR2) {
-                drive = PR2 - 1;
+                LF_effort = 2000;
+            } else if (LF_effort > PR2) {
+                LF_effort = PR2 - 1;
             }
-        }
-         else {
-            
-            
-            if(speed > 0){
-                speed *= -1;
+        } else {
+
+
+            if (LF_Speed > 0) {
+                LF_Speed *= -1;
             }
-                    
-            error = LF_PWM - speed; // get error from difference
-            
-            if (abs(error) > IntThresh) {
-                integral += error;
+
+            LF_error = LF_PWM - LF_Speed; // get error from difference
+
+            if (abs(LF_error) > IntThresh) {
+                LF_integral += LF_error;
             } else {
-                integral *= 0.9;
+                LF_integral *= 0.9;
             }
-            if (integral < -400) {
-                integral = -400;
+            if (LF_integral > 400) {
+                LF_integral = 400;
+            } else if (LF_integral < -400) {
+                LF_integral = -400;
             }
-            else if (integral > 400) {
-                integral = 400;
-            }
-            P = (error * propGain) >> 2;
-            I = (integral * intGain) >> 5;
-            D = (lastSpeed - speed * diffGain) >> 2;
-            drive += P + I + D;
+            LF_effort += ((LF_error * LF_P) >> 2) +((LF_integral * LF_I) >> 5) + (((LF_lastSpeed - LF_Speed) * LF_D) >> 2);
+
             // drive outputs PWM duty cycle
-            if (drive > 2000) {
+            if (LF_effort > 2000) {
                 // write 0
-                drive = 2000;
-            } else if (drive < 0) {
-                drive = 1;
+                LF_effort = 2000;
+            } else if (LF_effort < 0) {
+                LF_effort = 1;
             }
         }
 
-        if (dir != lastDir) {
-            rampCount = 0;
+
+
+
+        if (!(config1 & SIX_WHEEL_EN)) {//if not 6 wheel drive  
+            LM_effort = 2000;
+        } else if (!(Status1 & LM_ENC_STAT)) {//if encoder disconnected, do nothing, latch PWM 
+
+        } else if (LM_PWM > 0) {
+            LM_error = LM_PWM - LM_Speed; // get error from difference
+
+            if (abs(LM_error) > IntThresh) {
+                LM_integral += LM_error;
+            } else {
+                LM_integral *= 0.9;
+            }
+            if (LM_integral > 400) {
+                LM_integral = 400;
+            } else if (LM_integral < -400) {
+                LM_integral = -400;
+            }
+            LM_effort += ((LM_error * LM_P) >> 2) +((LM_integral * LM_I) >> 5) + (((LM_lastSpeed - LM_Speed) * LM_D) >> 2);
+
+            // drive outputs PWM duty cycle
+            if (LM_effort < 2000) {
+                // write 0
+                LM_effort = 2000;
+            } else if (LM_effort > PR2) {
+                LM_effort = PR2 - 1;
+            }
+        } else {
+
+
+            if (LM_Speed > 0) {
+                LM_Speed *= -1;
+            }
+
+            LM_error = LM_PWM - LM_Speed; // get error from difference
+
+            if (abs(LM_error) > IntThresh) {
+                LM_integral += LM_error;
+            } else {
+                LM_integral *= 0.9;
+            }
+            if (LM_integral > 400) {
+                LM_integral = 400;
+            } else if (LM_integral < -400) {
+                LM_integral = -400;
+            }
+            LM_effort += ((LM_error * LM_P) >> 2) +((LM_integral * LM_I) >> 5) + (((LM_lastSpeed - LM_Speed) * LM_D) >> 2);
+
+            // drive outputs PWM duty cycle
+            if (LM_effort > 2000) {
+                // write 0
+                LM_effort = 2000;
+            } else if (LM_effort < 0) {
+                LM_effort = 1;
+            }
+        }
+
+        if (!(Status1 & LB_ENC_STAT)) {//
+        } else if (LB_PWM > 0) {
+            LB_error = LB_PWM - LB_Speed; // get error from difference
+
+            if (abs(LB_error) > IntThresh) {
+                LB_integral += LB_error;
+            } else {
+                LB_integral *= 0.9;
+            }
+            if (LB_integral > 400) {
+                LB_integral = 400;
+            } else if (LB_integral < -400) {
+                LB_integral = -400;
+            }
+            LB_effort += ((LB_error * LB_P) >> 2) +((LB_integral * LB_I) >> 5) + (((LB_lastSpeed - LB_Speed) * LB_D) >> 2);
+
+            // drive outputs PWM duty cycle
+            if (LB_effort < 2000) {
+                // write 0
+                LB_effort = 2000;
+            } else if (LB_effort > PR2) {
+                LB_effort = PR2 - 1;
+            }
+        } else {
+
+
+            if (LB_Speed > 0) {
+                LB_Speed *= -1;
+            }
+
+            LB_error = LB_PWM - LB_Speed; // get error from difference
+
+            if (abs(LB_error) > IntThresh) {
+                LB_integral += LB_error;
+            } else {
+                LB_integral *= 0.9;
+            }
+            if (LB_integral > 400) {
+                LB_integral = 400;
+            } else if (LB_integral < -400) {
+                LB_integral = -400;
+            }
+            LB_effort += ((LB_error * LB_P) >> 2) +((LB_integral * LB_I) >> 5) + (((LB_lastSpeed - LB_Speed) * LB_D) >> 2);
+
+            // drive outputs PWM duty cycle
+            if (LB_effort > 2000) {
+                // write 0
+                LB_effort = 2000;
+            } else if (LB_effort < 0) {
+                LB_effort = 1;
+            }
         }
 
 
@@ -290,103 +604,56 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
 
 
 
-        lastSpeed = speed;
-        SetDCOC1PWM(drive);
-        OC1R = drive;
-
-        lastDir = dir;
+        LM_lastSpeed = LM_Speed;
+        LB_lastSpeed = LB_Speed;
+        LF_lastSpeed = LF_Speed;
+        SetDCOC4PWM(LM_effort);
+        SetDCOC1PWM(LF_effort);
+        SetDCOC5PWM(LB_effort);
         PT_YIELD_TIME_msec(20);
+
     }
     PT_END(pt);
 }
 
-static PT_THREAD(protothread_uart(struct pt *pt)) {
-    // this thread interacts with the PC keyboard to take user input and set up PID parameters
-    PT_BEGIN(pt);
-    while (1) {
-        // send the prompt via DMA to serial
-        sprintf(PT_send_buffer, "%s", "cmd>");
-        // by spawning a print thread
-        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output)); //send date and time
-        //spawn a thread to handle terminal input
-        // the input thread waits for input
-        // -- BUT does NOT block other threads
-        // string is returned in "PT_term_buffer"
-        PT_SPAWN(pt, &pt_input, PT_GetSerialBuffer(&pt_input)); //wait for  input
-        sscanf(PT_term_buffer, "%s %d", cmd, &value);
 
-        // echo
-
-        //        sprintf(PT_send_buffer,"\n");//next line
-        //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
-        //        sprintf(PT_send_buffer,"\r");//carriage return
-        //        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output) );
-
-        switch (cmd[0]) {
-            case 's':
-                LF_PWM = value;
-                break;
-            case 'p':
-                propGain = value;
-                break;
-            case 'i':
-                intGain = value;
-                break;
-            case 'd':
-                diffGain = value;
-                break;
-            default:
-                break;
-        }
-        sprintf(PT_send_buffer, "%s%d%s%d%s%d%s%d%s", "\nspeedTarget:", LF_PWM, "\n\rPropGain: ", propGain, "\n\rIntegral: ", intGain, "\n\rDifferential: ", diffGain, "\n\r"); //send original message
-        PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));
-
-        PT_YIELD_TIME_msec(50);
-    } // while(1)
-    PT_END(pt);
-} // uart input thread
-
-static PT_THREAD(protothread_anim(struct pt *pt)) {
-    // runs the LCD and updates around 5/second
-    PT_BEGIN(pt);
-    while (1) {
-        //write to screen
-        tft_fillRect(0, 0, 160, 120, ILI9340_BLACK);
-        tft_setCursor(0, 0);
-        sprintf(buffer, "%s%d%s%d%s%d%s%d%s%d%s%d%s%d", "PWM:", drive, "\nspeed: ", speed, "\nerror:", error, "\ntarget:", LF_PWM, "\nP:", propGain, "\nI:", intGain, "\nD:", diffGain);
-        tft_writeString(buffer);
-
-        PT_YIELD_TIME_msec(30);
-    }
-    PT_END(pt);
-} // animation thread
 
 // external interrupt
 
-void __ISR(_EXTERNAL_0_VECTOR, ipl1) INT0Interrupt(void) {
+void __ISR(_EXTERNAL_1_VECTOR, ipl1) INT1Interrupt(void) {
     //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
-    count++;
+    count_LF++;
 
     // clear interrupt flag
     mINT0ClearIntFlag();
 }
+void __ISR(_EXTERNAL_2_VECTOR, ipl1) INT2Interrupt(void) {
+    //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+    count_LB++;
 
-void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) { //empty ISR
-    // Timer interupt to read data
-    //sprintf(PT_send_buffer, "%s", "cmd>");
-    //mPORTAToggleBits(BIT_0);
-    /*
-       tft_fillRect(0, 0, 50, 50, ILI9340_BLACK);
-       tft_setCursor(0,0);
-       sprintf(buffer,"%d", count);
-       tft_writeString(buffer);
-       count = 0;
-     */
-    pulsesPerPeriod = count;
+    // clear interrupt flag
+    mINT0ClearIntFlag();
+}
+void __ISR(_EXTERNAL_4_VECTOR, ipl1) INT4Interrupt(void) {
+    //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+    count_LM++;
+
+    // clear interrupt flag
+    mINT0ClearIntFlag();
+}
+void __ISR(_TIMER_3_VECTOR, ipl2) Timer3Handler(void) { 
+    mT3ClearIntFlag();
+}
 
 
+void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) { 
+    LM_Speed = count_LM;//record number of encoder pulses
+    LF_Speed = count_LF;
+    LB_Speed = count_LB;
 
-    count = 0;
+    count_LM = 0;//zero counter variables
+    count_LF = 0;
+    count_LB = 0;
     mT2ClearIntFlag(); //clear interrupt flag, if you forget to do this, the microcontroller will interrupt continuously
 }
 
@@ -550,7 +817,7 @@ void InitI2C(void) {
     
     // Enable the I2C module with clock stretching enabled
     // define a Master BRG of 400kHz although this is not used by the slave
-    OpenI2C1(I2C_ON | I2C_7BIT_ADD | I2C_STR_EN|I2C_SM_DIS, BRG_VAL); //48);
+    OpenI2C1(I2C_SLW_DIS | I2C_ON | I2C_7BIT_ADD | I2C_STR_EN|I2C_SM_DIS, BRG_VAL); //48);
 //    I2C1BRG = BRG_VAL;
 //    I2C1CON = 0xD040;
 //    I2C1CON &= !I2C_SM_EN;
@@ -572,8 +839,11 @@ void InitI2C(void) {
 void main(void) {
 
 
+    SYSTEMConfigPerformance(sys_clock);
     // === I2C Init ================
     InitI2C();
+
+    
     ANSELA = 0; //make sure analog is cleared
     ANSELB = 0;
     AD1CON2 = 0;
@@ -589,58 +859,68 @@ void main(void) {
     ANSELB = 0;
     count = 0;
     
+    mPORTASetPinsDigitalOut(BIT_2);
+    mPORTBSetPinsDigitalOut(BIT_2 | BIT_3);    
+    
     RPB2R = 0x05;  // OC 4
-    RPB3R = 0x05;  // OC 2
+    RPB3R = 0x05;  // OC 1
     RPA2R = 0x06; // OC 5
     
-    mPORTASetPinsDigitalOut(BIT_0);
 
-    // external interrupt0:
-    mINT0IntEnable(TRUE);
-    mINT0SetIntPriority(INT_PRIORITY_LEVEL_1);
+
 
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_256, 4000);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
+    
+    OpenTimer3(T3_ON|T3_SOURCE_INT| T3_PS_1_8, 4000);
+    ConfigIntTimer3(T3_INT_OFF | T3_INT_PRIOR_2);
+
 
     // set up OC for PWM
-    CloseOC2();
-    ConfigIntOC2(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC2(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LF pin 6
+    ConfigIntOC1(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
+    OpenOC1(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LF pin 6
     ConfigIntOC4(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC4(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LM pin 7
+    OpenOC4(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LM pin 7
     ConfigIntOC5(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC5(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LB pin 9
+    OpenOC5(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LB pin 9
 
+    mPORTBSetPinsDigitalIn(BIT_4);
+    mPORTASetPinsDigitalIn(BIT_3 | BIT_4);
+    
+    INT1R = 0; //pin 10, LF_ENC
+    INT4R = 0x02; //pin 11, LM_ENC
+    INT2R = 0x02; //pin 12, LB_ENC
+    
+
+    mINT1IntEnable(TRUE);
+    mINT1SetIntPriority(INT_PRIORITY_LEVEL_1);
+    mINT2IntEnable(TRUE);
+    mINT2SetIntPriority(INT_PRIORITY_LEVEL_2);
+    mINT4IntEnable(TRUE);
+    mINT4SetIntPriority(INT_PRIORITY_LEVEL_3);
     
     // init the threads
-    PT_INIT(&pt_uart);
-    PT_INIT(&pt_anim);
+
     PT_INIT(&pt_pid);
+    PT_INIT(&pt_ENC);
     LF_PWM = 0;
     LM_PWM = 0;
     LB_PWM = 0;
     
-    //TFT INIT
-    tft_init_hw();
-    tft_begin();
-    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
-    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
-    tft_setCursor(0, 0);
-    tft_setTextColor(ILI9340_WHITE);
-    tft_setTextSize(2); //
-    sprintf(buffer, "%04x", "SPI1CON");
-    tft_writeString(buffer);
-    //    mJTAGPortEnable(0);
+    LF_effort = 2000;
+    LM_effort = 2000;
+    LB_effort = 2000;
+    SetDCOC4PWM(LM_effort);
+    SetDCOC1PWM(LF_effort);
+    SetDCOC5PWM(LB_effort);
     INTEnableSystemMultiVectoredInt();
-
-    drive = 2000;
     
     //round robin thread schedule
     while (1) {
-
-        PT_SCHEDULE(protothread_uart(&pt_uart));
-        PT_SCHEDULE(protothread_anim(&pt_anim));
-        PT_SCHEDULE(protothread_pid(&pt_pid));
+        if(config1 & PID_EN){
+            PT_SCHEDULE(protothread_ENC(&pt_ENC));
+            PT_SCHEDULE(protothread_pid(&pt_pid));
+        }
     }
 } // main
 
