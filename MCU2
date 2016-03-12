@@ -947,7 +947,7 @@ void main(void) {
 
     SYSTEMConfigPerformance(sys_clock); //clock CPU at 40MHz
     // === I2C Init ================
-//    InitI2C();
+    InitI2C();
 
     ANSELA = 0; //make sure analog is cleared
     ANSELB = 0;
@@ -1058,40 +1058,6 @@ void main(void) {
     SetDCOC3PWM(RB_effort);
     INTEnableSystemMultiVectoredInt();
  
-    OpenI2C1( I2C_EN, BRG_VAL ); 
-
-    int i = 0;
-    int RF_FLAG = 0;
-    int RB_FLAG = 0;
-    int lastCountRF;
-    int lastCountRB;
-    int RF_zero;
-    int RB_zero;
-    
-    delay_ms(500);
-    for(i; i < 600; i ++){
-        SetDCOC1PWM(RF_effort);
-        SetDCOC3PWM(RB_effort);       
-        delay_ms(100);
-        if(!count_RF && !lastCountRF && !RF_FLAG){
-            RF_FLAG= 1;
-            RF_zero = i;
-        }
-        if(!count_RB && !lastCountRB && !RB_FLAG){
-            RB_FLAG = 1;
-            RB_zero = i;
-        }
-        if(RB_FLAG && RF_FLAG){
-            break;
-        }
-        
-        
-    }
-    SendData2(RF_zero>>8, RF_zero&0xFF, 0x17);
-    SendData2(RB_zero>>8, RB_zero&0xFF, 0x17);
-    
-    
-    while(1);
     // init the threads
     PT_INIT(&pt_ENC);
     PT_INIT(&pt_pid);
