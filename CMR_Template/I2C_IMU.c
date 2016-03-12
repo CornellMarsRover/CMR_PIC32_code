@@ -251,7 +251,6 @@ int RcvIMUData(unsigned int reg_addr) {
     AckI2C2();
     IdleI2C2();
     rcv |= MasterReadI2C2()<<8;    //Read in MSB
-//    IdleI2C2(); 
 
     NotAckI2C2();
     IdleI2C2();
