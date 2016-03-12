@@ -70,6 +70,7 @@ static unsigned int Hum_sense;
 
 //Config
 #define ADDR_Config1  0x00 
+#define PID_EN 0x80
 /* BIT7(MSB) = PID_EN
  * 
  * PID_EN - If enabled, PWM addresses represent target speeds, if
@@ -102,9 +103,9 @@ static unsigned int Hum_sense;
  * effort level of motors on the same bank. When bit is cleared: all motors on 
  * bank will halt (note: only half of the rover will stop)
  * 
- * BIT1 = WHEEL_COUNT
+ * BIT1 = 6_WHEEL_EN
  * 
- * WHEEL_COUNT - when bit is set: 6 wheel drive is activated, otherwise 4 wheel 
+ * 6_WHEEL_EN - when bit is set: 6 wheel drive is activated, otherwise 4 wheel 
  * drive is used
  * 
  * 
@@ -211,206 +212,7 @@ typedef signed int fix16;
 #define PINS (CN15_ENABLE)
 #define PULLUPS (CN_PULLUP_DISABLE_ALL)
 
-//// receive function prototype (see below for code)
-//// int GetDataBuffer(char *buffer, int max_size);
-//
-//// === thread structures ============================================
-//// thread control structs
-static struct pt pt_pid, pt_input, pt_output, pt_DMA_output, pt_ADC;
 
-static PT_THREAD(protothread_ADC(struct pt *pt)){
-    PT_BEGIN(pt);
-    while(1){
-        Hum_sense = ReadADC10(0);
-
-        
-        PT_YIELD_TIME_msec(30);
-    }
-    PT_END(pt);
-}
-
-static const int ENC_TEST_THRESHOLD = 1000;
-
-static PT_THREAD(protothread_ENC(struct pt *pt)) {
-    PT_BEGIN(pt);
-    while (1) {
-        if (!(Status1 & 0x80)) {//if encoder already unplugged
-            if ((Status1 & 0x20) && ((config1 & 0x02) && (Status1 & 0x40))) {//if 
-                RF_PWM = (RM_PWM + RB_PWM) << 1; //set speed to average of remaining motors
-            } else if ((config1 & 0x02) && (Status1 & 0x40)) {
-                RF_PWM = RM_PWM;
-            } else if ((Status1 & 0x20)) {
-                RF_PWM = RB_PWM;
-            } else {
-                RF_PWM = 2000;
-            }
-
-            CNPUB |= 0x02; //pull-up enable
-            CNPDB &= !0x02;
-            PT_YIELD_TIME_msec(1);
-            if (!(PORTB & 0x02)) {//if not pulled high
-                Status1 |= 0x80;
-                CNPUB &= !0x02;
-            } else {
-                CNPDB |= 0x02; //pull-down
-                CNPUB &= !0x02
-                        PT_YIELD_TIME_msec(1);
-                if (PORTB & 0x02) {
-                    Status1 |= 0x80;
-                }
-
-            }
-        }
-        if (!(Status1 & 0x40)) {//if encoder already unplugged
-            if ((Status1 & 0x20) && ((Status1 & 0x80))) {//if 
-                RM_PWM = (RM_PWM + RB_PWM) << 1; //set speed to average of remaining motors
-            } else if ((Status1 & 0x20)) {
-                RM_PWM = RB_PWM;
-            } else if ((Status1 & 0x80)) {
-                RM_PWM = RF_PWM;
-
-            } else {
-                RM_PWM = 2000;
-            }
-
-            CNPUB |= 0x04; //pull-up enable
-            CNPDB &= !0x04;
-            PT_YIELD_TIME_msec(1);
-            if (!(PORTB & 0x04)) {//if not pulled high
-                Status1 |= 0x40;
-                CNPUB &= !0x04;
-            } else {
-                CNPDB |= 0x04; //pull-down
-                CNPUB &= !0x04;
-                PT_YIELD_TIME_msec(1);
-                if (PORTB & 0x04) {
-                    Status1 |= 0x40;
-                }
-
-            }
-        }
-        if (!(Status1 & !0x20)) {//if encoder already unplugged
-            if ((Status1 & 0x80) && ((Status1 & 0x40) && (config1 & 0x02))) {//if 
-                RB_PWM = (RM_PWM + RF_PWM) << 1; //set speed to average of remaining motors
-            } else if ((Status1 & 0x40)&&(config1 & 0x02)) {
-                RB_PWM = RM_PWM;
-            } else if ((Status1 & 0x80)) {
-                RB_PWM = RF_PWM;
-
-            } else {
-                RB_PWM = 2000;
-            }
-
-            CNPUB |= 0x01; //pull-up enable
-            CNPDB &= !0x01;
-            PT_YIELD_TIME_msec(1);
-            if (!(PORTB & 0x01)) {//if not pulled high
-                Status1 |= 0x20;
-                CNPUB &= !0x01;
-            } else {
-                CNPDB |= 0x01; //pull-down
-                CNPUB &= !0x01;
-                PT_YIELD_TIME_msec(1);
-                if (PORTB & 0x01) {
-                    Status1 |= 0x20;
-                }
-
-            }
-        }
-
-        if ((RF_Speed == 0) && ((RF_PWM > (2000 + ENC_TEST_THRESHOLD)) || (RF_PWM < (2000 - ENC_TEST_THRESHOLD)))) {
-            CNPUB |= 0x02; //pull-up enable
-            PT_YIELD_TIME_msec(1);
-            if (PORTB & 0x02) {//if pin pulled high
-                CNPUB &= !0x02; //pull-up disable
-                CNPDB |= 0x02; //pull-down enable
-                PT_YIELD_TIME_msec(1); //leave time for value to settle
-                if (!(PORTB & 0x02)) {//if pin pulled low
-                    Status1 &= !0x80;
-                    if ((Status1 & 0x20) && ((config1 & 0x02) && (Status1 & 0x40))) {//if 
-                        RF_PWM = (RM_PWM + RB_PWM) << 1; //set speed to average of remaining motors
-                    } else if ((config1 & 0x02) && (Status1 & 0x40)) {
-                        RF_PWM = RM_PWM;
-                    } else if ((Status1 & 0x20)) {
-                        RF_PWM = RB_PWM;
-                    } else {
-                        RF_PWM = 2000;
-                    }
-                }
-            }
-
-            CNPUB &= !0x02; //
-            CNPDB &= !0x02; //            
-        }
-        if ((RM_Speed == 0) && ((RM_PWM > (2000 + ENC_TEST_THRESHOLD)) || (RM_PWM < (2000 - ENC_TEST_THRESHOLD)) && (config1 & 0x02))) {
-            CNPUB |= 0x04; //pull-up enable
-            PT_YIELD_TIME_msec(1); //let pin value settle
-            if (PORTB & 0x04) {//if pin pulled high
-                CNPUB &= !0x04; //pull-up disable
-                CNPDB |= 0x04; //pull-down enable
-                PT_YIELD_TIME_msec(1); //leave time for value to settle
-                if (!(PORTB & 0x04)) {//if pin pulled low
-                    Status1 &= !0x40;
-                    if ((Status1 & 0x20) && ((Status1 & 0x80))) {//if 
-                        RM_PWM = (RM_PWM + RB_PWM) << 1; //set speed to average of remaining motors
-                    } else if ((Status1 & 0x20)) {
-                        RM_PWM = RB_PWM;
-                    } else if ((Status1 & 0x80)) {
-                        RM_PWM = RF_PWM;
-
-                    } else {
-                        RM_PWM = 2000;
-                    }
-                }
-            }
-
-            CNPUB &= !0x04; //
-            CNPDB &= !0x04; //            
-        }
-
-        if ((RB_Speed == 0) && ((RB_PWM > (2000 + ENC_TEST_THRESHOLD)) || (RB_PWM < (2000 - ENC_TEST_THRESHOLD)))) {
-            CNPUB |= 0x01; //pull-up enable
-            PT_YIELD_TIME_msec(1); //let pin value settle
-            if (PORTB & 0x01) {//if pin pulled high
-                CNPUB &= !0x01; //pull-up disable
-                CNPDB |= 0x01; //pull-down enable
-                PT_YIELD_TIME_msec(1); //leave time for value to settle
-                if (!(PORTB & 0x01)) {//if pin pulled low
-                    Status1 &= !0x20;
-                    if ((Status1 & 0x80) && ((Status1 & 0x40) && (config1 & 0x02))) {//if 
-                        RB_PWM = (RM_PWM + RF_PWM) << 1; //set speed to average of remaining motors
-                    } else if ((Status1 & 0x40)&&(config1 & 0x02)) {
-                        RB_PWM = RM_PWM;
-                    } else if ((Status1 & 0x80)) {
-                        RB_PWM = RF_PWM;
-
-                    } else {
-                        RB_PWM = 2000;
-                    }
-                }
-            }
-
-            CNPUB &= !0x01; //
-            CNPDB &= !0x01; //  
-        }
-
-
-
-
-
-        SetDCOC1PWM(RF_PWM);
-        SetDCOC3PWM(RB_PWM);
-        SetDCOC4PWM(RM_PWM);
-
-        PT_YIELD_TIME_msec(20);
-    }
-    PT_END(pt);
-}
-
-static int dir;
-static int lastDir;
-static int pulsesPerPeriod;
-//static char rampCount = 5;
 static int RF_error;
 static int RF_integral;
 static int RF_diffGain;
@@ -429,6 +231,211 @@ static int RB_diffGain;
 static int RB_propGain;
 static int RB_effort;
 static int RB_lastSpeed;
+
+//// receive function prototype (see below for code)
+//// int GetDataBuffer(char *buffer, int max_size);
+//
+//// === thread structures ============================================
+//// thread control structs
+static struct pt pt_pid, pt_input, pt_output, pt_DMA_output, pt_ADC, pt_ENC;
+
+static PT_THREAD(protothread_ADC(struct pt *pt)){
+    PT_BEGIN(pt);
+    while(1){
+        Hum_sense = ReadADC10(0);
+
+        
+        PT_YIELD_TIME_msec(30);
+    }
+    PT_END(pt);
+}
+
+static int ENC_TEST_THRESHOLD = 1000;
+
+static PT_THREAD(protothread_ENC(struct pt *pt)) {
+    PT_BEGIN(pt);
+    while (1) {
+        if (!(Status1 & 0x80)) {//if encoder already unplugged
+            if ((Status1 & 0x20) && ((config1 & 0x02) && (Status1 & 0x40))) {//if 
+                RF_effort = (RM_effort + RB_effort) >> 1; //set speed to average of remaining motors
+            } else if ((config1 & 0x02) && (Status1 & 0x40)) {
+                RF_effort = RM_effort;
+            } else if ((Status1 & 0x20)) {
+                RF_effort = RB_effort;
+            } else {
+                RF_effort = 2000;
+            }
+
+            CNPUB |= 0x02; //pull-up enable
+            CNPDB &= !0x02;
+            PT_YIELD_TIME_msec(1);
+            if (!(PORTB & 0x02)) {//if not pulled high
+                Status1 |= 0x80;
+                CNPUB &= !0x02;
+            } else {
+                CNPDB |= 0x02; //pull-down
+                CNPUB &= !0x02;
+                PT_YIELD_TIME_msec(1);
+                if (PORTB & 0x02) {
+                    Status1 |= 0x80;
+                    CNPDB &= !0x02;
+                }
+
+            }
+        }
+        if (!(Status1 & 0x40)) {//if encoder already unplugged
+            if ((Status1 & 0x20) && ((Status1 & 0x80))) {//if 
+                RM_effort = (RM_effort + RB_effort) >> 1; //set speed to average of remaining motors
+            } else if ((Status1 & 0x20)) {
+                RM_effort = RB_effort;
+            } else if ((Status1 & 0x80)) {
+                RM_effort = RF_effort;
+
+            } else {
+                RM_effort = 2000;
+            }
+
+            CNPUB |= 0x04; //pull-up enable
+            CNPDB &= !0x04;
+            PT_YIELD_TIME_msec(1);
+            if (!(PORTB & 0x04)) {//if not pulled high
+                Status1 |= 0x40;
+                CNPUB &= !0x04;
+            } else {
+                CNPDB |= 0x04; //pull-down
+                CNPUB &= !0x04;
+                PT_YIELD_TIME_msec(1);
+                if (PORTB & 0x04) {
+                    Status1 |= 0x40;
+                    CNPDB &= !0x04;
+
+                }
+
+            }
+        }
+        if (!(Status1 & 0x20)) {//if encoder already unplugged
+            if ((Status1 & 0x80) && ((Status1 & 0x40) && (config1 & 0x02))) {//if 
+                RB_effort = (RM_effort + RF_effort) >> 1; //set speed to average of remaining motors
+            } else if ((Status1 & 0x40)&&(config1 & 0x02)) {
+                RB_effort = RM_effort;
+            } else if ((Status1 & 0x80)) {
+                RB_effort = RF_effort;
+
+            } else {
+                RB_effort = 2000;
+            }
+
+            CNPUB |= 0x01; //pull-up enable
+            CNPDB &= !0x01;
+            PT_YIELD_TIME_msec(1);
+            if (!(PORTB & 0x01)) {//if not pulled high
+                Status1 |= 0x20;
+                CNPUB &= !0x01;
+            } else {
+                CNPDB |= 0x01; //pull-down
+                CNPUB &= !0x01;
+                PT_YIELD_TIME_msec(1);
+                if (PORTB & 0x01) {
+                    Status1 |= 0x20;
+                    CNPDB &= !0x01;
+
+                }
+
+            }
+        }
+
+        if ((RF_Speed == 0) && ((RF_effort > (2000 + ENC_TEST_THRESHOLD)) || (RF_effort < (2000 - ENC_TEST_THRESHOLD)))) {
+            CNPUB |= 0x02; //pull-up enable
+            CNPDB &= !0x02;
+            PT_YIELD_TIME_msec(1);
+            if (PORTB & 0x02) {//if pin pulled high
+                CNPUB &= !0x02; //pull-up disable
+                CNPDB |= 0x02; //pull-down enable
+                PT_YIELD_TIME_msec(1); //leave time for value to settle
+                if (!(PORTB & 0x02)) {//if pin pulled low
+                    Status1 &= !0x80;
+                    if ((Status1 & 0x20) && ((config1 & 0x02) && (Status1 & 0x40))) {//if 
+                        RF_effort = (RM_effort + RB_effort) >> 1; //set speed to average of remaining motors
+                    } else if ((config1 & 0x02) && (Status1 & 0x40)) {
+                        RF_effort = RM_effort;
+                    } else if ((Status1 & 0x20)) {
+                        RF_effort = RB_effort;
+                    } else {
+                        RF_effort = 2000;
+                    }
+                }
+            }
+
+            CNPUB &= !0x02; //
+            CNPDB &= !0x02; //            
+        }
+        if ((RM_Speed == 0) && ((RM_effort > (2000 + ENC_TEST_THRESHOLD)) || (RM_effort < (2000 - ENC_TEST_THRESHOLD)) && (config1 & 0x02))) {
+            CNPUB |= 0x04; //pull-up enable
+            CNPDB &= !0x04; //pull-up enable
+            PT_YIELD_TIME_msec(1); //let pin value settle
+            if (PORTB & 0x04) {//if pin pulled high
+                CNPUB &= !0x04; //pull-up disable
+                CNPDB |= 0x04; //pull-down enable
+                PT_YIELD_TIME_msec(1); //leave time for value to settle
+                if (!(PORTB & 0x04)) {//if pin pulled low
+                    Status1 &= !0x40;
+                    if ((Status1 & 0x20) && ((Status1 & 0x80))) {//if 
+                        RM_effort = (RM_effort + RB_effort) >> 1; //set speed to average of remaining motors
+                    } else if ((Status1 & 0x20)) {
+                        RM_effort = RB_effort;
+                    } else if ((Status1 & 0x80)) {
+                        RM_effort = RF_effort;
+
+                    } else {
+                        RM_effort = 2000;
+                    }
+                }
+            }
+
+            CNPUB &= !0x04; //
+            CNPDB &= !0x04; //            
+        }
+
+        if ((RB_Speed == 0) && ((RB_effort > (2000 + ENC_TEST_THRESHOLD)) || (RB_effort < (2000 - ENC_TEST_THRESHOLD)))) {
+            CNPUB |= 0x01; //pull-up enable
+            CNPDB &= !0x01;
+            PT_YIELD_TIME_msec(1); //let pin value settle
+            if (PORTB & 0x01) {//if pin pulled high
+                CNPUB &= !0x01; //pull-up disable
+                CNPDB |= 0x01; //pull-down enable
+                PT_YIELD_TIME_msec(1); //leave time for value to settle
+                if (!(PORTB & 0x01)) {//if pin pulled low
+                    Status1 &= !0x20;
+                    if ((Status1 & 0x80) && ((Status1 & 0x40) && (config1 & 0x02))) {//if 
+                        RB_effort = (RM_effort + RF_effort) >> 1; //set speed to average of remaining motors
+                    } else if ((Status1 & 0x40)&&(config1 & 0x02)) {
+                        RB_effort = RM_effort;
+                    } else if ((Status1 & 0x80)) {
+                        RB_effort = RF_effort;
+
+                    } else {
+                        RB_effort = 2000;
+                    }
+                }
+            }
+
+            CNPUB &= !0x01; //
+            CNPDB &= !0x01; //  
+        }
+
+
+
+
+
+        SetDCOC1PWM(RF_effort);
+        SetDCOC3PWM(RB_effort);
+        SetDCOC2PWM(RM_effort);
+
+        PT_YIELD_TIME_msec(20);
+    }
+    PT_END(pt);
+}
+
 
 static PT_THREAD(protothread_pid(struct pt *pt)) {
     PT_BEGIN(pt);
@@ -450,7 +457,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
             } else if (RF_integral < -400) {
                 RF_integral = -400;
             }
-            RF_effort = ((RF_error * RF_P) >> 2) +((RF_integral * RF_I) >> 5) + ((RF_lastSpeed - RF_Speed * RF_D) >> 2);
+            RF_effort += ((RF_error * RF_P) >> 2) +((RF_integral * RF_I) >> 5) + (((RF_lastSpeed - RF_Speed) * RF_D) >> 2);
 
             // drive outputs PWM duty cycle
             if (RF_effort < 2000) {
@@ -478,7 +485,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
             } else if (RF_integral < -400) {
                 RF_integral = -400;
             }
-            RF_effort = ((RF_error * RF_P) >> 2) +((RF_integral * RF_I) >> 5) + ((RF_lastSpeed - RF_Speed * RF_D) >> 2);
+            RF_effort += ((RF_error * RF_P) >> 2) +((RF_integral * RF_I) >> 5) + (((RF_lastSpeed - RF_Speed) * RF_D) >> 2);
 
             // drive outputs PWM duty cycle
             if (RF_effort > 2000) {
@@ -509,7 +516,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
             } else if (RM_integral < -400) {
                 RM_integral = -400;
             }
-            RM_effort = ((RM_error * RM_P) >> 2) +((RM_integral * RM_I) >> 5) + ((RM_lastSpeed - RM_Speed * RM_D) >> 2);
+            RM_effort += ((RM_error * RM_P) >> 2) +((RM_integral * RM_I) >> 5) + (((RM_lastSpeed - RM_Speed) * RM_D) >> 2);
 
             // drive outputs PWM duty cycle
             if (RM_effort < 2000) {
@@ -537,7 +544,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
             } else if (RM_integral < -400) {
                 RM_integral = -400;
             }
-            RM_effort = ((RM_error * RM_P) >> 2) +((RM_integral * RM_I) >> 5) + ((RM_lastSpeed - RM_Speed * RM_D) >> 2);
+            RM_effort += ((RM_error * RM_P) >> 2) +((RM_integral * RM_I) >> 5) + (((RM_lastSpeed - RM_Speed) * RM_D) >> 2);
 
             // drive outputs PWM duty cycle
             if (RM_effort > 2000) {
@@ -562,7 +569,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
             } else if (RB_integral < -400) {
                 RB_integral = -400;
             }
-            RB_effort = ((RB_error * RB_P) >> 2) +((RB_integral * RB_I) >> 5) + ((RB_lastSpeed - RB_Speed * RB_D) >> 2);
+            RB_effort += ((RB_error * RB_P) >> 2) +((RB_integral * RB_I) >> 5) + (((RB_lastSpeed - RB_Speed * RB_D)) >> 2);
 
             // drive outputs PWM duty cycle
             if (RB_effort < 2000) {
@@ -590,7 +597,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
             } else if (RB_integral < -400) {
                 RB_integral = -400;
             }
-            RB_effort = ((RB_error * RB_P) >> 2) +((RB_integral * RB_I) >> 5) + ((RB_lastSpeed - RB_Speed * RB_D) >> 2);
+            RB_effort += ((RB_error * RB_P) >> 2) +((RB_integral * RB_I) >> 5) + (((RB_lastSpeed - RB_Speed * RB_D)) >> 2);
 
             // drive outputs PWM duty cycle
             if (RB_effort > 2000) {
@@ -607,12 +614,11 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
 
 
         RM_lastSpeed = RM_Speed;
-        SetDCOC4PWM(RM_effort);
-        OC4R = RM_effort;
+        RB_lastSpeed = RB_Speed;
+        RF_lastSpeed = RF_Speed;
+        SetDCOC2PWM(RM_effort);
         SetDCOC1PWM(RF_effort);
-        OC1R = RF_effort;
         SetDCOC3PWM(RB_effort);
-        OC3R = RB_effort;
         PT_YIELD_TIME_msec(20);
     }
     PT_END(pt);
@@ -643,23 +649,14 @@ void __ISR(_EXTERNAL_3_VECTOR, ipl1) INT3Interrupt(void) {
 }
 
 void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) { //empty ISR
-    // Timer interupt to read data
-    //sprintf(PT_send_buffer, "%s", "cmd>");
-    //mPORTAToggleBits(BIT_0);
-    /*
-       tft_fillRect(0, 0, 50, 50, ILI9340_BLACK);
-       tft_setCursor(0,0);
-       sprintf(buffer,"%d", count);
-       tft_writeString(buffer);
-       count = 0;
-     */
-    RM_Speed = count_RM;
+
+    RM_Speed = count_RM;//record number of encoder pulses
     RF_Speed = count_RF;
     RB_Speed = count_RB;
 
 
 
-    count_RM = 0;
+    count_RM = 0;//zero counter variables
     count_RF = 0;
     count_RB = 0;
     mT2ClearIntFlag(); //clear interrupt flag, if you forget to do this, the microcontroller will interrupt continuously
@@ -676,6 +673,24 @@ static unsigned char I2C_request;
 // Master and Bus Collision events will also trigger this handler.
 //
 ///////////////////////////////////////////////////////////////////
+
+void SendData2 (int data1, int data2, unsigned int address){
+	StartI2C1();	        //Send the Start Bit
+	IdleI2C1();		//Wait to complete
+
+	MasterWriteI2C1((address << 1));  //Sends the slave address over the I2C line.  This must happen first so the 
+                                             //proper slave is selected to receive data.
+	IdleI2C1();	        //Wait to complete
+
+	MasterWriteI2C1(data1);  //Sends data byte over I2C line
+	IdleI2C1();		//Wait to complete
+    MasterWriteI2C1(data2);  //Sends data byte over I2C line
+	IdleI2C1();		//Wait to complete
+	StopI2C1();	        //Send the Stop condition
+	IdleI2C1();	        //Wait to complete
+
+} //end function
+
 
 void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
     unsigned char temp;
@@ -710,13 +725,42 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
             switch (I2C_request) {
                 case ADDR_ALL_PWM:
                     if ((I2CDataIn >> 7)) {
-                        RF_PWM = (~I2CDataIn); //bitwise complement
-                        RM_PWM = RF_PWM;
-                        RB_PWM = RF_PWM;
+                        if(config1 & PID_EN){
+                            RF_PWM = (~I2CDataIn)+1; //bitwise complement
+                            RM_PWM = RF_PWM;
+                            RB_PWM = RF_PWM;
+                        }
+                        else{
+                            RF_effort = 2000 + (((~I2CDataIn)+1)<<4);
+                            if(RF_effort > 3999){
+                                RF_effort = 3999;
+                                RM_effort = 3999;
+                                RB_effort = 3999;                                
+                            }
+                            else{
+                                RM_effort = RF_effort;
+                                RB_effort = RF_effort;
+                            }
+                                    
+                        }                            
                     } else {
-                        RF_PWM = -1 * (I2CDataIn);
-                        RM_PWM = RF_PWM;
-                        RB_PWM = RF_PWM;
+                        if(config1 & PID_EN){
+                            RF_PWM = -1 * (I2CDataIn);
+                            RM_PWM = RF_PWM;
+                            RB_PWM = RF_PWM;
+                        }
+                        else{
+                            RF_effort = 2000 - (((~I2CDataIn)+1)<<4);
+                            if(RF_effort < 1){
+                                RF_effort = 1;
+                                RM_effort = 1;
+                                RB_effort = 1;                                
+                            }
+                            else{
+                                RM_effort = RF_effort;
+                                RB_effort = RF_effort;
+                            }           
+                        } 
                     }
                     break;
                 case ADDR_ALL_P:
@@ -735,11 +779,29 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     RB_D = I2CDataIn;
                     break;
                 case ADDR_RF_PWM:
-                    if ((I2CDataIn >> 7)) {
-                        RF_PWM = (~I2CDataIn);
-                    } else {
-                        RF_PWM = -1 * (I2CDataIn);
+                    if(config1 & PID_EN){
+                        if ((I2CDataIn >> 7)) {
+                            RF_PWM = (~I2CDataIn)+1;
+                        } else {
+                            RF_PWM = -1 * (I2CDataIn);
+                        }
                     }
+                    else{
+                        if ((I2CDataIn >> 7)) {
+                            RF_effort = 2000 + (((~I2CDataIn)+1)<<4);
+                            if(RF_effort > 3999){
+                                RF_effort = 3999;
+                            } 
+                        }
+                        else {
+                            RF_effort = 2000 - (I2CDataIn);
+                            if(RF_effort < 1){
+                                RF_effort = 1;
+                            }
+                        }
+                    
+                    }
+                    SetDCOC1PWM(RF_effort);
                     break;
                 case ADDR_RF_P:
                     RF_P = I2CDataIn;
@@ -752,11 +814,29 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     break;
 
                 case ADDR_RM_PWM:
-                    if ((I2CDataIn >> 7)) {
-                        RM_PWM = (~I2CDataIn);
-                    } else {
-                        RM_PWM = -1 * (I2CDataIn);
+                    if(config1 & PID_EN){
+                        if ((I2CDataIn >> 7)) {
+                            RM_PWM = (~I2CDataIn)+1;
+                        } else {
+                            RM_PWM = -1 * (I2CDataIn);
+                        }
                     }
+                    else{
+                        if ((I2CDataIn >> 7)) {
+                            RM_effort = 2000 + (((~I2CDataIn)+1)<<4);
+                            if(RM_effort > 3999){
+                                RM_effort = 3999;
+                            } 
+                        }
+                        else {
+                            RM_effort = 2000 - (I2CDataIn);
+                            if(RM_effort < 1){
+                                RM_effort = 1;
+                            }
+                        }
+                    
+                    }
+                    SetDCOC2PWM(RM_effort);
                     break;
                 case ADDR_RM_P:
                     RM_P = I2CDataIn;
@@ -768,11 +848,29 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     RM_D = I2CDataIn;
                     break;
                 case ADDR_RB_PWM:
-                    if ((I2CDataIn >> 7)) {
-                        RB_PWM = (~I2CDataIn);
-                    } else {
-                        RB_PWM = -1 * (I2CDataIn);
+                    if(config1 & PID_EN){
+                        if ((I2CDataIn >> 7)) {
+                            RB_PWM = (~I2CDataIn)+1;
+                        } else {
+                            RB_PWM = -1 * (I2CDataIn);
+                        }
                     }
+                    else{
+                        if ((I2CDataIn >> 7)) {
+                            RB_effort = 2000 + (((~I2CDataIn)+1)<<4);
+                            if(RB_effort > 3999){
+                                RB_effort = 3999;
+                            } 
+                        }
+                        else {
+                            RB_effort = 2000 - (I2CDataIn);
+                            if(RB_effort < 1){
+                                RB_effort = 1;
+                            }
+                        }
+                    
+                    }
+                    SetDCOC3PWM(RB_effort);
                     break;
                 case ADDR_RB_P:
                     RB_P = I2CDataIn;
@@ -849,7 +947,7 @@ void main(void) {
 
     SYSTEMConfigPerformance(sys_clock); //clock CPU at 40MHz
     // === I2C Init ================
-    InitI2C();
+//    InitI2C();
 
     ANSELA = 0; //make sure analog is cleared
     ANSELB = 0;
@@ -906,14 +1004,16 @@ void main(void) {
     RPA1R = 0;
     CM2CON = 0;
     CVRCON = 0x0000;
-    ANSELA = 0; //make sure analog is cleared
-    ANSELB = 0;
 
-    RPB3R = 0x05; // OC 1
-    RPB13R = 0x05; // OC 4
+
+    RPB3R = 0x05; // OC 1, RB
+    RPA1R = 0x05; // OC 2
     RPB14R = 0x05; // OC 3
 
-    mPORTASetPinsDigitalIn(BIT_0);
+    mPORTBSetPinsDigitalOut(BIT_14|BIT_3);
+    mPORTASetPinsDigitalOut(BIT_1);
+    mPORTASetPinsDigitalIn(BIT_0|BIT_2);
+    mPORTBSetPinsDigitalIn(BIT_0|BIT_1|BIT_2);
     //    CNPUA |= 0xFF;
     //    ODCA |= 0xC0;
 
@@ -933,42 +1033,75 @@ void main(void) {
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_256, 4000);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
 
+    OpenTimer3(T3_ON|T3_SOURCE_INT|T3_PS_1_8,4000);
+    ConfigIntTimer3(T3_INT_OFF | T3_INT_PRIOR_2);
+    
     // set up OC for PWM
     CloseOC1();
     ConfigIntOC1(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC1(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RF
-    ConfigIntOC4(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC4(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RM
+    OpenOC1(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RF
+    ConfigIntOC2(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
+    OpenOC2(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RM
     ConfigIntOC3(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC3(OC_ON | OC_TIMER2_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RB
+    OpenOC3(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RB
 
 
     RF_PWM = 0;
     RM_PWM = 0;
     RB_PWM = 0;
 
-    //TFT INIT
-    //    tft_init_hw();
-    //    tft_begin();
-    //    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
-    //    tft_setRotation(0); // Use tft_setRotation(1) for 320x240
-    //    tft_setCursor(0, 0);
-    //    tft_setTextColor(ILI9340_WHITE);
-    //    tft_setTextSize(2); //
-    //    sprintf(buffer, "%04x", "SPI1CON");
-    //    tft_writeString(buffer);
-    //    mJTAGPortEnable(0);
+    RF_effort = 2000;
+    RM_effort = 2000;
+    RB_effort = 2000;
+    SetDCOC2PWM(RM_effort);
+    SetDCOC1PWM(RF_effort);
+    SetDCOC3PWM(RB_effort);
     INTEnableSystemMultiVectoredInt();
+ 
+    OpenI2C1( I2C_EN, BRG_VAL ); 
 
+    int i = 0;
+    int RF_FLAG = 0;
+    int RB_FLAG = 0;
+    int lastCountRF;
+    int lastCountRB;
+    int RF_zero;
+    int RB_zero;
+    
+    delay_ms(500);
+    for(i; i < 600; i ++){
+        SetDCOC1PWM(RF_effort);
+        SetDCOC3PWM(RB_effort);       
+        delay_ms(100);
+        if(!count_RF && !lastCountRF && !RF_FLAG){
+            RF_FLAG= 1;
+            RF_zero = i;
+        }
+        if(!count_RB && !lastCountRB && !RB_FLAG){
+            RB_FLAG = 1;
+            RB_zero = i;
+        }
+        if(RB_FLAG && RF_FLAG){
+            break;
+        }
+        
+        
+    }
+    SendData2(RF_zero>>8, RF_zero&0xFF, 0x17);
+    SendData2(RB_zero>>8, RB_zero&0xFF, 0x17);
+    
+    
+    while(1);
     // init the threads
     PT_INIT(&pt_ENC);
     PT_INIT(&pt_pid);
     PT_INIT(&pt_ADC);
     //round robin thread schedule
     while (1) {
-
-        PT_SCHEDULE(protothread_ENC(&pt_ENC));
-        PT_SCHEDULE(protothread_pid(&pt_pid));
+        if(config1 & PID_EN){
+            PT_SCHEDULE(protothread_ENC(&pt_ENC));
+            PT_SCHEDULE(protothread_pid(&pt_pid));
+        }
         PT_SCHEDULE(protothread_ADC(&pt_ADC));
     }
 } // main
