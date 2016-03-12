@@ -112,15 +112,17 @@ static PT_THREAD(protothread_uart(struct pt *pt)) {
         PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));//send date and time
     
     while (1) {
-        buffer[0] = RcvIMUData(BNO055_ACCEL_DATA_X_LSB_ADDR);
-        buffer[1] = RcvIMUData(BNO055_ACCEL_DATA_Y_LSB_ADDR);
-        buffer[2] = RcvIMUData(BNO055_ACCEL_DATA_Z_LSB_ADDR);
+        buffer[0] = RcvIMUData(BNO055_EULER_H_LSB_ADDR);
+        buffer[1] = RcvIMUData(BNO055_EULER_R_LSB_ADDR);
+        buffer[2] = RcvIMUData(BNO055_EULER_P_LSB_ADDR);
 //        temp = RcvIMUData(BNO055_ACCEL_DATA_X_LSB_ADDR);
         
         
 
-        sprintf(PT_send_buffer, "%s     %s%d, %s%d, %s%d%s", "Accelerometer value: " , "X: "
-                , buffer[0], "Y: ", buffer[1], "Z: ", buffer[2],"\n\r");
+        sprintf(PT_send_buffer, "%s     %s%d, %s%d, %s%d, %s%d%s", "Accelerometer value: " , "W: ", buffer[0], "X: "
+                , buffer[1], "Y: ", buffer[2], "Z: ", buffer[3],"\n\r");
+//        sprintf(PT_send_buffer, "%s     %s%d, %s%d, %s%d%s", "Accelerometer value: " , "W: ", buffer[0], "X: "
+//                , buffer[1], "Y: ", buffer[2],"\n\r");
         // by spawning a print thread
         PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));//send date and time
 
@@ -209,38 +211,27 @@ int RcvIRTemp(void){
     return rcv;                 //Return read value    
 }
 
+void SendIMUData (int reg_addr, int data){
+	StartI2C2();	        //Send the Start Bit
+	IdleI2C2();		//Wait to complete
+
+	MasterWriteI2C2(0x50);  //Sends the slave address over the I2C line.                                               
+	IdleI2C2();             //Wait to complete
+
+	MasterWriteI2C2(reg_addr);  //Sends data byte over I2C line
+	IdleI2C2();                 //Wait to complete
+    
+    MasterWriteI2C2(data);
+    IdleI2C2();                 //wait for ack
+    
+	StopI2C2();	        //Send the Stop condition
+	IdleI2C2();	        //Wait to complete
+} 
+
+
 int RcvIMUData(unsigned int reg_addr) {
 //	//see page 92 of https://www.adafruit.com/datasheets/BST_BNO055_DS000_12.pdf
-//    rcv = 0;
-//    StartI2C1();				//Send line start condition
-//	IdleI2C1();			        //Wait to complete
-//	
-//    MasterWriteI2C1(0x28);// slave address OR 0 (write command)
-//	IdleI2C1();				//Wait to complete, get ack
-//	
-//    MasterWriteI2C1(0x08);// register address
-//	IdleI2C1();             //wait to complete, get ack
-//    
-//    RestartI2C2();
-//    IdleI2C2();
-//    
-////    for (int i = 0; i < 8; i++){
-////        rcv |= MasterReadI2C2()<<(8*i); //Read in MSB
-////        IdleI2C1();         
-////        AckI2C2();                  //Acknowledge MSB
-////        IdleI2C2();
-////    }
-//    
-//    rcv |= MasterReadI2C2(); //Read in MSB
-//    IdleI2C1();         
-//    AckI2C2();                  //Acknowledge MSB
-//    IdleI2C2();
-//    
-//    NotAckI2C2();           //NACK to stop transmission
-//    StopI2C1();				//Send line stop condition
-//	IdleI2C1();				//Wait co complete
-//	return rcv;				//Return read value
-    
+   
     rcv = 0;
     StartI2C2();                //Send line start condition
     IdleI2C2();                 //Wait to complete
@@ -291,7 +282,13 @@ void main(void) {
     unsigned char data = 0; //output data, digital value to be converted
     //unsigned char addr = 0x1C; 
     //Thermometer sensor: 5A
-
+    
+    //===========Configuring the IMU========================//
+    unsigned int OPR_CODE = 0x3D;
+    SendIMUData(OPR_CODE, 0x0C);        //sets IMU mode
+            
+    //========================================================//
+            
     while(1){
 //        temp = RcvIRTemp();
 //        cels = temp / 50 - 273; //convert read value to celsius
