@@ -112,9 +112,10 @@ static PT_THREAD(protothread_uart(struct pt *pt)) {
         PT_SPAWN(pt, &pt_DMA_output, PT_DMA_PutSerialBuffer(&pt_DMA_output));//send date and time
     
     while (1) {
-        buffer[0] = RcvIMUData(BNO055_EULER_H_LSB_ADDR);
-        buffer[1] = RcvIMUData(BNO055_EULER_R_LSB_ADDR);
-        buffer[2] = RcvIMUData(BNO055_EULER_P_LSB_ADDR);
+        buffer[0] = RcvIMUData(BNO055_QUATERNION_DATA_W_LSB_ADDR);
+        buffer[1] = RcvIMUData(BNO055_QUATERNION_DATA_X_LSB_ADDR);
+        buffer[2] = RcvIMUData(BNO055_QUATERNION_DATA_Y_LSB_ADDR);
+	buffer[3] = RcvIMUData(BNO055_QUATERNION_DATA_Z_LSB_ADDR);
 //        temp = RcvIMUData(BNO055_ACCEL_DATA_X_LSB_ADDR);
         
         
