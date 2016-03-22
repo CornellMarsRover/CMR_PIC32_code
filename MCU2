@@ -19,11 +19,6 @@
 #include "tft_master.h"
 
 char buffer[60]; // string buffer
-//static int speedTarget; // target fan speed
-static int propGain; //   p
-static int intGain; //    i
-static int diffGain; //   d
-static int integral;
 
 //static int speed;
 //static int lastSpeed;
@@ -40,27 +35,27 @@ static int IntThresh = 0;
 
 
 
-static unsigned char I2CDataIn;
+static char I2CDataIn;
 static unsigned char byteReceved;
-static unsigned char config1 = 0x8C;
+static unsigned char config1 = 0x8E;
 static unsigned char Status1 = 0xFF;
-static unsigned int RF_PWM;
-static unsigned char RF_P;
-static unsigned char RF_I;
-static unsigned char RF_D;
-static unsigned int RM_PWM;
-static unsigned char RM_P;
-static unsigned char RM_I;
-static unsigned char RM_D;
-static unsigned int RB_PWM;
-static unsigned char RB_P;
-static unsigned char RB_I;
-static unsigned char RB_D;
+static int RF_PWM;
+static unsigned char RF_P = 8;
+static unsigned char RF_I = 2;
+static unsigned char RF_D = 2;
+static int RM_PWM;
+static unsigned char RM_P = 8;
+static unsigned char RM_I = 2;
+static unsigned char RM_D = 2;
+static int RB_PWM;
+static unsigned char RB_P = 8;
+static unsigned char RB_I = 2;
+static unsigned char RB_D = 2;
 static unsigned char halted;
 
-static unsigned char RF_Speed;
-static unsigned char RM_Speed;
-static unsigned char RB_Speed;
+static char RF_Speed;
+static char RM_Speed;
+static char RB_Speed;
 static unsigned char Bat_lvl;
 static unsigned int Hum_sense;
 
@@ -69,8 +64,9 @@ static unsigned int Hum_sense;
 
 
 //Config
+#define ADDR_CLR_I2C_STATE 0xFF
 #define ADDR_Config1  0x00 
-#define PID_EN 0x80
+
 /* BIT7(MSB) = PID_EN
  * 
  * PID_EN - If enabled, PWM addresses represent target speeds, if
@@ -112,6 +108,9 @@ static unsigned int Hum_sense;
 
 Default state of config1 = 0x8C
  */
+#define PID_EN 0x80
+#define SIX_WHEEL_EN 0x02
+
 
 //Read-only
 #define ADDR_Status1  0x01
@@ -139,7 +138,9 @@ Default state of config1 = 0x8C
 
 Default state of register = 0xFF
  */
-
+#define RF_ENC_STAT 0x80
+#define RM_ENC_STAT 0x40
+#define RB_ENC_STAT 0x20
 
 
 //Motor addresses
@@ -171,7 +172,6 @@ Default state of register = 0xFF
 #define ADDR_RB_SPEED 0x32
 #define ADDR_BAT_LVL 0x33
 #define ADDR_HUM_SENSE 0x34
-
 
 //// command array
 static char cmd[30];
@@ -215,21 +215,18 @@ typedef signed int fix16;
 
 static int RF_error;
 static int RF_integral;
-static int RF_diffGain;
-static int RF_propGain;
 static int RF_effort;
+static int last_RF_effort;
 static int RF_lastSpeed;
 static int RM_error;
 static int RM_integral;
-static int RM_diffGain;
-static int RM_propGain;
 static int RM_effort;
+static int last_RM_effort;
 static int RM_lastSpeed;
 static int RB_error;
 static int RB_integral;
-static int RB_diffGain;
-static int RB_propGain;
 static int RB_effort;
+static int last_RB_effort;
 static int RB_lastSpeed;
 
 //// receive function prototype (see below for code)
@@ -243,7 +240,12 @@ static PT_THREAD(protothread_ADC(struct pt *pt)){
     PT_BEGIN(pt);
     while(1){
         Hum_sense = ReadADC10(0);
-
+//        tft_setCursor(0,0);
+//        tft_fillRect(0,0,240, 50, ILI9340_BLACK);
+//        tft_setTextColor(ILI9340_WHITE);
+//        tft_setTextSize(2);
+//        sprintf(buffer, "%d %d", RB_effort, RB_PWM);
+//        tft_writeString(buffer);
         
         PT_YIELD_TIME_msec(30);
     }
@@ -427,24 +429,65 @@ static PT_THREAD(protothread_ENC(struct pt *pt)) {
 
 
 
-        SetDCOC1PWM(RF_effort);
-        SetDCOC3PWM(RB_effort);
         SetDCOC2PWM(RM_effort);
-
+        SetDCOC1PWM(RB_effort);
+        SetDCOC3PWM(RF_effort);
         PT_YIELD_TIME_msec(20);
     }
     PT_END(pt);
 }
 
+static int RF_dir;
+static int RM_dir;
+static int RB_dir;
+static int RF_reverse;
+static int RM_reverse;
+static int RB_reverse;
+static int last_last_RB_effort;
+static int last_last_RM_effort;
+static int last_last_RF_effort;
 
 static PT_THREAD(protothread_pid(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
 
-
-        if (!(Status1 & 0x08)) {//if encoder disconnected, do nothing, latch PWM 
-
-        } else if (RF_PWM > 0) {
+        if (Status1 & RF_ENC_STAT) {
+            
+            if(RF_effort > 1300 && RF_effort < 2300){
+                if(last_RF_effort != RF_effort){//check for divide by zero condition
+                    RF_dir = (RF_Speed- RF_lastSpeed)/(RF_effort - last_RF_effort) ;//+((RB_Speed- RB_lastSpeed)/(RB_effort - last_RB_effort)- (RB_lastSpeed- RB_last_last_speed)/(last_RB_effort - last_last_RB_effort))/(RB_effort-last_last_RB_effort);// ds/de gives direction information    
+                }
+            }
+            else if (RF_effort <= 1300){//effort very small, speed is certainly negative
+                RF_dir = -1;
+            }
+            else if (RF_effort >= 2300){//effort very large, positive speed
+                RF_dir = 1;
+            }
+            else{
+                RF_dir = RF_reverse;
+            }
+            
+            if(RF_dir < 0) {
+                if(RF_Speed > 0){
+                    RF_Speed *= -1;
+                }
+                RF_reverse = -1;//save direction
+            }
+            else if(RF_dir == 0 && (RF_reverse==-1)){
+                if(RF_Speed>0){
+                    RF_Speed *= -1;
+                }//in special case when speed did not change, latch last direction
+            }
+            else{
+                if(RF_Speed < 0){
+                    RF_Speed *= -1; 
+                }
+                RF_reverse = 1; //save direction
+            }            
+            
+            
+            
             RF_error = RF_PWM - RF_Speed; // get error from difference
 
             if (abs(RF_error) > IntThresh) {
@@ -458,52 +501,53 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
                 RF_integral = -400;
             }
             RF_effort += ((RF_error * RF_P) >> 2) +((RF_integral * RF_I) >> 5) + (((RF_lastSpeed - RF_Speed) * RF_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (RF_effort < 2000) {
-                // write 0
-                RF_effort = 2000;
-            } else if (RF_effort > PR2) {
-                RF_effort = PR2 - 1;
+            
+            if(RF_effort > 3999){
+                RF_effort = 3999;
             }
-        } else {
-
-
-            if (RF_Speed > 0) {
-                RF_Speed *= -1;
-            }
-
-            RF_error = RF_PWM - RF_Speed; // get error from difference
-
-            if (abs(RF_error) > IntThresh) {
-                RF_integral += RF_error;
-            } else {
-                RF_integral *= 0.9;
-            }
-            if (RF_integral > 400) {
-                RF_integral = 400;
-            } else if (RF_integral < -400) {
-                RF_integral = -400;
-            }
-            RF_effort += ((RF_error * RF_P) >> 2) +((RF_integral * RF_I) >> 5) + (((RF_lastSpeed - RF_Speed) * RF_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (RF_effort > 2000) {
-                // write 0
-                RF_effort = 2000;
-            } else if (RF_effort < 0) {
+            else if(RF_effort < 1){
                 RF_effort = 1;
             }
-        }
+            
+        } 
 
 
-
-
-        if ((config1 & 0x02)) {//if 6 wheel drive or 
-            RM_PWM = 2000;
-        } else if (!(Status1 & 0x04)) {//if encoder disconnected, do nothing, latch PWM 
-
-        } else if (RM_PWM > 0) {
+        if (Status1 & RM_ENC_STAT && config1 & SIX_WHEEL_EN) {
+            if(RM_effort > 1300 && RM_effort < 2300){
+                if(last_RM_effort != RM_effort ){//check for divide by zero condition
+                    RM_dir = (RM_Speed- RM_lastSpeed)/(RM_effort - last_RM_effort) ;// ds/de gives direction information    
+                }
+            }
+            else if (RM_effort <= 1300){//effort very small, speed is certainly negative
+                RM_dir = -1;
+            }
+            else if (RM_effort >= 2300){//effort very large, positive speed
+                RM_dir = 1;
+            }
+            else{
+                RM_dir = RM_reverse;
+            }
+            
+            if(RM_dir < 0) {
+                if(RM_Speed > 0){
+                    RM_Speed *= -1;
+                }
+                RM_reverse = -1;//save direction
+            }
+            else if(RM_dir == 0 && (RM_reverse==-1)){
+                if(RM_Speed>0){
+                    RM_Speed *= -1;
+                }//in special case when speed did not change, latch last direction
+            }
+            else{
+                if(RM_Speed < 0){
+                    RM_Speed *= -1; 
+                }
+                RM_reverse = 1; //save direction
+            }            
+            
+            
+            
             RM_error = RM_PWM - RM_Speed; // get error from difference
 
             if (abs(RM_error) > IntThresh) {
@@ -517,46 +561,53 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
                 RM_integral = -400;
             }
             RM_effort += ((RM_error * RM_P) >> 2) +((RM_integral * RM_I) >> 5) + (((RM_lastSpeed - RM_Speed) * RM_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (RM_effort < 2000) {
-                // write 0
-                RM_effort = 2000;
-            } else if (RM_effort > PR2) {
-                RM_effort = PR2 - 1;
+            
+            if(RM_effort > 3999){
+                RM_effort = 3999;
             }
-        } else {
-
-
-            if (RM_Speed > 0) {
-                RM_Speed *= -1;
-            }
-
-            RM_error = RM_PWM - RM_Speed; // get error from difference
-
-            if (abs(RM_error) > IntThresh) {
-                RM_integral += RM_error;
-            } else {
-                RM_integral *= 0.9;
-            }
-            if (RM_integral > 400) {
-                RM_integral = 400;
-            } else if (RM_integral < -400) {
-                RM_integral = -400;
-            }
-            RM_effort += ((RM_error * RM_P) >> 2) +((RM_integral * RM_I) >> 5) + (((RM_lastSpeed - RM_Speed) * RM_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (RM_effort > 2000) {
-                // write 0
-                RM_effort = 2000;
-            } else if (RM_effort < 0) {
+            else if(RM_effort < 1){
                 RM_effort = 1;
             }
-        }
+            
+        } 
 
-        if (!(Status1 & 0x02)) {//
-        } else if (RB_PWM > 0) {
+        if (Status1 & RB_ENC_STAT) {
+            
+            if(RB_effort > 1300 && RB_effort < 2300){
+                if(last_RB_effort != RB_effort){//check for divide by zero condition
+                    RB_dir = (RB_Speed- RB_lastSpeed)/(RB_effort - last_RB_effort) ;//+((RB_Speed- RB_lastSpeed)/(RB_effort - last_RB_effort)- (RB_lastSpeed- RB_last_last_speed)/(last_RB_effort - last_last_RB_effort))/(RB_effort-last_last_RB_effort);// ds/de gives direction information    
+                }
+            }
+            else if (RB_effort <= 1300){//effort very small, speed is certainly negative
+                RB_dir = -1;
+            }
+            else if (RB_effort >= 2300){//effort very large, positive speed
+                RB_dir = 1;
+            }
+            else{
+                RB_dir = RB_reverse;
+            }
+            
+            if(RB_dir < 0) {
+                if(RB_Speed > 0){
+                    RB_Speed *= -1;
+                }
+                RB_reverse = -1;//save direction
+            }
+            else if(RB_dir == 0 && (RB_reverse==-1)){
+                if(RB_Speed>0){
+                    RB_Speed *= -1;
+                }//in special case when speed did not change, latch last direction
+            }
+            else{
+                if(RB_Speed < 0){
+                    RB_Speed *= -1; 
+                }
+                RB_reverse = 1; //save direction
+            }            
+            
+            
+            
             RB_error = RB_PWM - RB_Speed; // get error from difference
 
             if (abs(RB_error) > IntThresh) {
@@ -569,86 +620,60 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
             } else if (RB_integral < -400) {
                 RB_integral = -400;
             }
-            RB_effort += ((RB_error * RB_P) >> 2) +((RB_integral * RB_I) >> 5) + (((RB_lastSpeed - RB_Speed * RB_D)) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (RB_effort < 2000) {
-                // write 0
-                RB_effort = 2000;
-            } else if (RB_effort > PR2) {
-                RB_effort = PR2 - 1;
+            RB_effort += ((RB_error * RB_P) >> 2) +((RB_integral * RB_I) >> 5) + (((RB_lastSpeed - RB_Speed) * RB_D) >> 2);
+            
+            if(RB_effort > 3999){
+                RB_effort = 3999;
             }
-        } else {
-
-
-            if (RB_Speed > 0) {
-                RB_Speed *= -1;
-            }
-
-            RB_error = RB_PWM - RB_Speed; // get error from difference
-
-            if (abs(RB_error) > IntThresh) {
-                RB_integral += RB_error;
-            } else {
-                RB_integral *= 0.9;
-            }
-            if (RB_integral > 400) {
-                RB_integral = 400;
-            } else if (RB_integral < -400) {
-                RB_integral = -400;
-            }
-            RB_effort += ((RB_error * RB_P) >> 2) +((RB_integral * RB_I) >> 5) + (((RB_lastSpeed - RB_Speed * RB_D)) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (RB_effort > 2000) {
-                // write 0
-                RB_effort = 2000;
-            } else if (RB_effort < 0) {
+            else if(RB_effort < 1){
                 RB_effort = 1;
             }
-        }
-
-
-
-
-
-
+            
+        } 
+        
+//        tft_fillRect(0,0,240,30, ILI9340_BLACK);
+//        tft_setTextColor(ILI9340_WHITE);
+//        tft_setTextSize(2);
+//        tft_setCursor(0,0);
+//        sprintf(buffer, "%d %d %d", RB_Speed, RB_effort, RB_PWM);
+//        tft_writeString(buffer);
+        
         RM_lastSpeed = RM_Speed;
         RB_lastSpeed = RB_Speed;
         RF_lastSpeed = RF_Speed;
+        last_RB_effort = RB_effort;
+        last_RM_effort = RM_effort;
+        last_RF_effort = RF_effort;
         SetDCOC2PWM(RM_effort);
-        SetDCOC1PWM(RF_effort);
-        SetDCOC3PWM(RB_effort);
+        SetDCOC1PWM(RB_effort);
+        SetDCOC3PWM(RF_effort);
         PT_YIELD_TIME_msec(20);
     }
     PT_END(pt);
 }
 
 void __ISR(_EXTERNAL_1_VECTOR, ipl1) INT1Interrupt(void) {
-    //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
-    count_RM++;
-
-    // clear interrupt flag
-    mINT0ClearIntFlag();
-}
-
-void __ISR(_EXTERNAL_2_VECTOR, ipl1) INT2Interrupt(void) {
-    //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
     count_RB++;
 
     // clear interrupt flag
-    mINT0ClearIntFlag();
+    mINT1ClearIntFlag();
 }
 
-void __ISR(_EXTERNAL_3_VECTOR, ipl1) INT3Interrupt(void) {
-    //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+void __ISR(_EXTERNAL_2_VECTOR, ipl2) INT2Interrupt(void) {
+    count_RM++;
+    
+    // clear interrupt flag
+    mINT2ClearIntFlag();
+}
+
+void __ISR(_EXTERNAL_3_VECTOR, ipl3) INT3Interrupt(void) {
     count_RF++;
 
     // clear interrupt flag
-    mINT0ClearIntFlag();
+    mINT3ClearIntFlag();
 }
 
-void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) { //empty ISR
+void __ISR(_TIMER_2_VECTOR, ipl4) Timer2Handler(void) { //empty ISR
 
     RM_Speed = count_RM;//record number of encoder pulses
     RF_Speed = count_RF;
@@ -665,6 +690,10 @@ void __ISR(_TIMER_2_VECTOR, ipl2) Timer2Handler(void) { //empty ISR
 static int I2Cstate = 0;
 static unsigned char I2C_request;
 
+void __ISR(_TIMER_3_VECTOR, ipl5) Timer3Handler(void) { //empty ISR
+    mT3ClearIntFlag(); //clear interrupt flag, if you forget to do this, the microcontroller will interrupt continuously
+}
+
 ///////////////////////////////////////////////////////////////////
 //
 // Slave I2C interrupt handler
@@ -674,7 +703,7 @@ static unsigned char I2C_request;
 //
 ///////////////////////////////////////////////////////////////////
 
-void SendData2 (int data1, int data2, unsigned int address){
+void SendData3 (int data1, int data2, int data3,  unsigned int address){
 	StartI2C1();	        //Send the Start Bit
 	IdleI2C1();		//Wait to complete
 
@@ -686,6 +715,8 @@ void SendData2 (int data1, int data2, unsigned int address){
 	IdleI2C1();		//Wait to complete
     MasterWriteI2C1(data2);  //Sends data byte over I2C line
 	IdleI2C1();		//Wait to complete
+    MasterWriteI2C1(data3);
+    IdleI2C1();
 	StopI2C1();	        //Send the Stop condition
 	IdleI2C1();	        //Wait to complete
 
@@ -701,7 +732,8 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         mI2C1MClearIntFlag();
         return;
     }
-    if (IFS1bits.I2C1BIF) {
+    if (IFS1bits.I2C1BIF) {//bus collision
+        I2Cstate = 0; 
         mI2C1BClearIntFlag();
         return;
     }
@@ -718,20 +750,20 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         byteReceved = 1;
         I2C1CONbits.SCLREL = 1; // release clock stretch bit
 
-        if (I2Cstate == 0) {
+        if (I2Cstate == 0 && I2CDataIn != ADDR_CLR_I2C_STATE) {
             I2Cstate = 1;
             I2C_request = I2CDataIn;
         } else if (I2Cstate == 1) {
             switch (I2C_request) {
                 case ADDR_ALL_PWM:
-                    if ((I2CDataIn >> 7)) {
+                    if ((I2CDataIn & 0x80)) {
                         if(config1 & PID_EN){
-                            RF_PWM = (~I2CDataIn)+1; //bitwise complement
+                            RF_PWM = ((~I2CDataIn)+1)<<1; //bitwise complement
                             RM_PWM = RF_PWM;
                             RB_PWM = RF_PWM;
                         }
                         else{
-                            RF_effort = 2000 + (((~I2CDataIn)+1)<<4);
+                            RF_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
                             if(RF_effort > 3999){
                                 RF_effort = 3999;
                                 RM_effort = 3999;
@@ -750,7 +782,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                             RB_PWM = RF_PWM;
                         }
                         else{
-                            RF_effort = 2000 - (((~I2CDataIn)+1)<<4);
+                            RF_effort = 2000 - (((int)I2CDataIn)<<4);
                             if(RF_effort < 1){
                                 RF_effort = 1;
                                 RM_effort = 1;
@@ -781,27 +813,27 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                 case ADDR_RF_PWM:
                     if(config1 & PID_EN){
                         if ((I2CDataIn >> 7)) {
-                            RF_PWM = (~I2CDataIn)+1;
+                            RF_PWM = ((~I2CDataIn)+1)<<1;
                         } else {
                             RF_PWM = -1 * (I2CDataIn);
                         }
                     }
                     else{
                         if ((I2CDataIn >> 7)) {
-                            RF_effort = 2000 + (((~I2CDataIn)+1)<<4);
+                            RF_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
                             if(RF_effort > 3999){
                                 RF_effort = 3999;
                             } 
                         }
                         else {
-                            RF_effort = 2000 - (I2CDataIn);
+                            RF_effort = 2000 - ((int)(I2CDataIn));
                             if(RF_effort < 1){
                                 RF_effort = 1;
                             }
                         }
                     
                     }
-                    SetDCOC1PWM(RF_effort);
+                    SetDCOC3PWM(RF_effort);
                     break;
                 case ADDR_RF_P:
                     RF_P = I2CDataIn;
@@ -816,20 +848,20 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                 case ADDR_RM_PWM:
                     if(config1 & PID_EN){
                         if ((I2CDataIn >> 7)) {
-                            RM_PWM = (~I2CDataIn)+1;
+                            RM_PWM = ((~I2CDataIn)+1)<<1;
                         } else {
                             RM_PWM = -1 * (I2CDataIn);
                         }
                     }
                     else{
                         if ((I2CDataIn >> 7)) {
-                            RM_effort = 2000 + (((~I2CDataIn)+1)<<4);
+                            RM_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
                             if(RM_effort > 3999){
                                 RM_effort = 3999;
                             } 
                         }
                         else {
-                            RM_effort = 2000 - (I2CDataIn);
+                            RM_effort = 2000 - ((int)(I2CDataIn));
                             if(RM_effort < 1){
                                 RM_effort = 1;
                             }
@@ -850,27 +882,27 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                 case ADDR_RB_PWM:
                     if(config1 & PID_EN){
                         if ((I2CDataIn >> 7)) {
-                            RB_PWM = (~I2CDataIn)+1;
+                            RB_PWM = ((~I2CDataIn)+1)<<1;
                         } else {
                             RB_PWM = -1 * (I2CDataIn);
                         }
                     }
                     else{
                         if ((I2CDataIn >> 7)) {
-                            RB_effort = 2000 + (((~I2CDataIn)+1)<<4);
+                            RB_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
                             if(RB_effort > 3999){
                                 RB_effort = 3999;
                             } 
                         }
                         else {
-                            RB_effort = 2000 - (I2CDataIn);
+                            RB_effort = 2000 - ((int)(I2CDataIn));
                             if(RB_effort < 1){
                                 RB_effort = 1;
                             }
                         }
                     
                     }
-                    SetDCOC3PWM(RB_effort);
+                    SetDCOC1PWM(RB_effort);
                     break;
                 case ADDR_RB_P:
                     RB_P = I2CDataIn;
@@ -889,6 +921,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
 
             }
             I2Cstate = 0;
+            I2C_request = 0;
         }
 
 
@@ -896,20 +929,26 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         // read of the slave device, read the address
         temp = SlaveReadI2C1();//dummy read
         
-        if(I2Cstate == ADDR_HUM_SENSE){
+        if(I2C_request == ADDR_HUM_SENSE){
             SlaveWriteI2C1(Hum_sense >> 8);            
+        }
+        else if(I2C_request == ADDR_Status1){
+            SlaveWriteI2C1(Status1);            
         }
         else{
             SlaveWriteI2C1(0x00);
+            I2C_request = 0;
         }
     } else if ((I2C1STATbits.R_W == 1) && (I2C1STATbits.D_A == 1)) {
         // output the data until the MASTER terminates the
         // transfer with a NACK, continuing reads return 0
-        if(I2Cstate == ADDR_HUM_SENSE){
+//        temp = SlaveReadI2C1();//dummy read
+        if(I2C_request == ADDR_HUM_SENSE){
             SlaveWriteI2C1(Hum_sense & 255);            
         }
         else{
             SlaveWriteI2C1(0x00);
+            I2C_request = 0;
         }
 
     }
@@ -918,13 +957,12 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
 }
 
 void InitI2C(void) {
-    unsigned char temp;
 
     CloseI2C1();
 
     // Enable the I2C module with clock stretching enabled
     // define a Master BRG of 400kHz although this is not used by the slave
-    OpenI2C1(I2C_SLW_DIS | I2C_ON | I2C_7BIT_ADD | I2C_STR_EN | I2C_SM_DIS, BRG_VAL); //48);
+    OpenI2C1( I2C_SLW_DIS |I2C_ON | I2C_7BIT_ADD | I2C_STR_EN | I2C_SM_DIS, BRG_VAL); //48); //
     //    I2C1BRG = BRG_VAL;
     //    I2C1CON = 0xD040;
     //    I2C1CON &= !I2C_SM_EN;
@@ -994,21 +1032,14 @@ void main(void) {
     OpenADC10(PARAM1, PARAM2, PARAM3, PARAM4, PARAM5); // configure ADC using the parameters defined above
 
     EnableADC10(); // Enable the ADC 
-    
-    
-    
-    
 
     PT_setup();
-    RPA0R = 0;
-    RPA1R = 0;
-    CM2CON = 0;
-    CVRCON = 0x0000;
+
 
 
     RPB3R = 0x05; // OC 1, RB
-    RPA1R = 0x05; // OC 2
-    RPB14R = 0x05; // OC 3
+    RPA1R = 0x05; // OC 2, RM
+    RPB14R = 0x05; // OC 3, RF
 
     mPORTBSetPinsDigitalOut(BIT_14|BIT_3);
     mPORTASetPinsDigitalOut(BIT_1);
@@ -1019,16 +1050,14 @@ void main(void) {
 
     // external interrupt0:
 
-    IC2R = 0x02; //pin 4, RB_ENC
-    IC3R = 0x03; //pin 5, RF_ENC
-    IC1R = 0x04; //pin 6, RM_ENC
+    INT1R = 0x02; //pin 4, RB_ENC
+    INT3R = 0x02; //pin 5, RF_ENC
+    INT2R = 0x04; //pin 6, RM_ENC
 
-    mINT1IntEnable(TRUE);
-    mINT1SetIntPriority(INT_PRIORITY_LEVEL_1);
-    mINT2IntEnable(TRUE);
-    mINT2SetIntPriority(INT_PRIORITY_LEVEL_2);
-    mINT3IntEnable(TRUE);
-    mINT3SetIntPriority(INT_PRIORITY_LEVEL_3);
+
+    ConfigINT1(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_1);
+    ConfigINT2(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_2);
+    ConfigINT3(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_3);
 
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_256, 4000);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
@@ -1036,14 +1065,14 @@ void main(void) {
     OpenTimer3(T3_ON|T3_SOURCE_INT|T3_PS_1_8,4000);
     ConfigIntTimer3(T3_INT_OFF | T3_INT_PRIOR_2);
     
-    // set up OC for PWM
+//    // set up OC for PWM
     CloseOC1();
     ConfigIntOC1(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC1(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RF
+    OpenOC1(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RB
     ConfigIntOC2(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
     OpenOC2(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RM
     ConfigIntOC3(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC3(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RB
+    OpenOC3(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000); //RF
 
 
     RF_PWM = 0;
@@ -1054,19 +1083,28 @@ void main(void) {
     RM_effort = 2000;
     RB_effort = 2000;
     SetDCOC2PWM(RM_effort);
-    SetDCOC1PWM(RF_effort);
-    SetDCOC3PWM(RB_effort);
-    INTEnableSystemMultiVectoredInt();
- 
+    SetDCOC1PWM(RB_effort);
+    SetDCOC3PWM(RF_effort);
+
     // init the threads
     PT_INIT(&pt_ENC);
     PT_INIT(&pt_pid);
     PT_INIT(&pt_ADC);
     //round robin thread schedule
+//    tft_init_hw();
+//    tft_begin();
+//    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+    INTEnableSystemMultiVectoredInt();
+    
     while (1) {
         if(config1 & PID_EN){
-            PT_SCHEDULE(protothread_ENC(&pt_ENC));
+//            PT_SCHEDULE(protothread_ENC(&pt_ENC));
             PT_SCHEDULE(protothread_pid(&pt_pid));
+        }
+        else{
+            SetDCOC2PWM(RM_effort);
+            SetDCOC1PWM(RB_effort);
+            SetDCOC3PWM(RF_effort);
         }
         PT_SCHEDULE(protothread_ADC(&pt_ADC));
     }
