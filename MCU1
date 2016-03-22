@@ -20,47 +20,35 @@
 
 char buffer[60]; // string buffer
 //static int speedTarget; // target fan speed
-static int propGain; //   p
-static int intGain; //    i
-static int diffGain; //   d
-static int integral;
 
-static int speed;
-static int lastSpeed;
-static int drive;
-static int error;
-static int IntThresh;
-static int P;
-static int I;
-static int D;
 
 #define I2CBAUD 10000 //clock operating at 10kHz
 #define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
-#define I2CAddress 0x1C;
+#define I2CAddress 0x1C
 
 
 
-static unsigned char I2CDataIn;
+static char I2CDataIn;
 static unsigned char byteReceved;
-static unsigned char config1 = 0x8C;
+static unsigned char config1 = 0x8E;
 static unsigned char Status1 = 0xFF;
-static unsigned int LF_PWM;
-static unsigned char LF_P;
-static unsigned char LF_I;
-static unsigned char LF_D;
-static unsigned int LM_PWM;
-static unsigned char LM_P;
-static unsigned char LM_I;
-static unsigned char LM_D;
-static unsigned int LB_PWM;
-static unsigned char LB_P;
-static unsigned char LB_I;
-static unsigned char LB_D;
+static int LF_PWM;
+static unsigned char LF_P = 8;
+static unsigned char LF_I = 2;
+static unsigned char LF_D = 2;
+static int LM_PWM;
+static unsigned char LM_P = 8;
+static unsigned char LM_I = 2;
+static unsigned char LM_D = 2;
+static int LB_PWM;
+static unsigned char LB_P = 8;
+static unsigned char LB_I = 2;
+static unsigned char LB_D = 2;
 static unsigned char halted;
 
-static unsigned char LF_Speed;
-static unsigned char LM_Speed;
-static unsigned char LB_Speed;
+static char LF_Speed;
+static char LM_Speed;
+static char LB_Speed;
 static unsigned char Bat_lvl;
 static unsigned char Hum_sense;
 
@@ -69,6 +57,7 @@ static unsigned char Hum_sense;
 
 
 //Config
+#define ADDR_CLR_I2C_STATE 0xFF
 #define ADDR_Config1  0x00 
 #define PID_EN 0x80
 /* BIT7(MSB) = PID_EN
@@ -100,7 +89,7 @@ static unsigned char Hum_sense;
  * 
  * 6_WHEEL_EN - when bit is set, all 6 wheels are used, otherwise only 4 are in use
  * 
- * Default state of config1 = 0x8C
+ * Default state of config1 = 0x8E
  */
 #define SIX_WHEEL_EN    0x02
 
@@ -209,26 +198,20 @@ typedef signed int fix16;
 
 static int LF_error;
 static int LF_integral;
-static int LF_diffGain;
-static int LF_propGain;
 static int LF_effort;
 static int LF_lastSpeed;
 static int LM_error;
 static int LM_integral;
-static int LM_diffGain;
-static int LM_propGain;
 static int LM_effort;
 static int LM_lastSpeed;
 static int LB_error;
 static int LB_integral;
-static int LB_diffGain;
-static int LB_propGain;
 static int LB_effort;
 static int LB_lastSpeed;
 static int count_LF;
 static int count_LM;
 static int count_LB;
-
+static int IntThresh = 0;
 //// receive function prototype (see below for code)
 //// int GetDataBuffer(char *buffer, int max_size);
 //
@@ -413,8 +396,8 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
 
 
 
-    SetDCOC4PWM(LM_effort);
-    SetDCOC1PWM(LF_effort);
+    SetDCOC4PWM(LF_effort);
+    SetDCOC1PWM(LM_effort);
     SetDCOC5PWM(LB_effort);
 
         PT_YIELD_TIME_msec(20);
@@ -423,19 +406,62 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
     PT_END(pt);
 }
 
-static int dir;
-static int lastDir;
-static int pulsesPerPeriod;
-static char rampCount = 5;
+static int LF_dir;
+static int LM_dir;
+static int LB_dir;
+static int LF_reverse;
+static int LM_reverse;
+static int LB_reverse;
+static int last_last_LB_effort;
+static int last_last_LM_effort;
+static int last_last_LF_effort;
+static int last_LF_effort;
+static int last_LM_effort;
+static int last_LB_effort;
+
+
 
 static PT_THREAD(protothread_pid(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
 
-
-        if (!(Status1 & LF_ENC_STAT)) {//if encoder disconnected, do nothing, latch PWM 
-
-        } else if (LF_PWM > 0) {
+        if (Status1 & LF_ENC_STAT) {
+            
+            if(LF_effort > 1300 && LF_effort < 2300){
+                if(last_LF_effort != LF_effort){//check for divide by zero condition
+                    LF_dir = (LF_Speed- LF_lastSpeed)/(LF_effort - last_LF_effort) ;//+((RB_Speed- RB_lastSpeed)/(RB_effort - last_RB_effort)- (RB_lastSpeed- RB_last_last_speed)/(last_RB_effort - last_last_RB_effort))/(RB_effort-last_last_RB_effort);// ds/de gives direction information    
+                }
+            }
+            else if (LF_effort <= 1300){//effort very small, speed is certainly negative
+                LF_dir = -1;
+            }
+            else if (LF_effort >= 2300){//effort very large, positive speed
+                LF_dir = 1;
+            }
+            else{
+                LF_dir = LF_reverse;
+            }
+            
+            if(LF_dir < 0) {
+                if(LF_Speed > 0){
+                    LF_Speed *= -1;
+                }
+                LF_reverse = -1;//save direction
+            }
+            else if(LF_dir == 0 && (LF_reverse==-1)){
+                if(LF_Speed>0){
+                    LF_Speed *= -1;
+                }//in special case when speed did not change, latch last direction
+            }
+            else{
+                if(LF_Speed < 0){
+                    LF_Speed *= -1; 
+                }
+                LF_reverse = 1; //save direction
+            }            
+            
+            
+            
             LF_error = LF_PWM - LF_Speed; // get error from difference
 
             if (abs(LF_error) > IntThresh) {
@@ -449,52 +475,53 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
                 LF_integral = -400;
             }
             LF_effort += ((LF_error * LF_P) >> 2) +((LF_integral * LF_I) >> 5) + (((LF_lastSpeed - LF_Speed) * LF_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (LF_effort < 2000) {
-                // write 0
-                LF_effort = 2000;
-            } else if (LF_effort > PR2) {
-                LF_effort = PR2 - 1;
+            
+            if(LF_effort > 3999){
+                LF_effort = 3999;
             }
-        } else {
-
-
-            if (LF_Speed > 0) {
-                LF_Speed *= -1;
-            }
-
-            LF_error = LF_PWM - LF_Speed; // get error from difference
-
-            if (abs(LF_error) > IntThresh) {
-                LF_integral += LF_error;
-            } else {
-                LF_integral *= 0.9;
-            }
-            if (LF_integral > 400) {
-                LF_integral = 400;
-            } else if (LF_integral < -400) {
-                LF_integral = -400;
-            }
-            LF_effort += ((LF_error * LF_P) >> 2) +((LF_integral * LF_I) >> 5) + (((LF_lastSpeed - LF_Speed) * LF_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (LF_effort > 2000) {
-                // write 0
-                LF_effort = 2000;
-            } else if (LF_effort < 0) {
+            else if(LF_effort < 1){
                 LF_effort = 1;
             }
-        }
+            
+        } 
 
 
-
-
-        if (!(config1 & SIX_WHEEL_EN)) {//if not 6 wheel drive  
-            LM_effort = 2000;
-        } else if (!(Status1 & LM_ENC_STAT)) {//if encoder disconnected, do nothing, latch PWM 
-
-        } else if (LM_PWM > 0) {
+        if (Status1 & LM_ENC_STAT && config1 & SIX_WHEEL_EN) {
+            if(LM_effort > 1300 && LM_effort < 2300){
+                if(last_LM_effort != LM_effort ){//check for divide by zero condition
+                    LM_dir = (LM_Speed- LM_lastSpeed)/(LM_effort - last_LM_effort) ;// ds/de gives direction information    
+                }
+            }
+            else if (LM_effort <= 1300){//effort very small, speed is certainly negative
+                LM_dir = -1;
+            }
+            else if (LM_effort >= 2300){//effort very large, positive speed
+                LM_dir = 1;
+            }
+            else{
+                LM_dir = LM_reverse;
+            }
+            
+            if(LM_dir < 0) {
+                if(LM_Speed > 0){
+                    LM_Speed *= -1;
+                }
+                LM_reverse = -1;//save direction
+            }
+            else if(LM_dir == 0 && (LM_reverse==-1)){
+                if(LM_Speed>0){
+                    LM_Speed *= -1;
+                }//in special case when speed did not change, latch last direction
+            }
+            else{
+                if(LM_Speed < 0){
+                    LM_Speed *= -1; 
+                }
+                LM_reverse = 1; //save direction
+            }            
+            
+            
+            
             LM_error = LM_PWM - LM_Speed; // get error from difference
 
             if (abs(LM_error) > IntThresh) {
@@ -508,46 +535,53 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
                 LM_integral = -400;
             }
             LM_effort += ((LM_error * LM_P) >> 2) +((LM_integral * LM_I) >> 5) + (((LM_lastSpeed - LM_Speed) * LM_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (LM_effort < 2000) {
-                // write 0
-                LM_effort = 2000;
-            } else if (LM_effort > PR2) {
-                LM_effort = PR2 - 1;
+            
+            if(LM_effort > 3999){
+                LM_effort = 3999;
             }
-        } else {
-
-
-            if (LM_Speed > 0) {
-                LM_Speed *= -1;
-            }
-
-            LM_error = LM_PWM - LM_Speed; // get error from difference
-
-            if (abs(LM_error) > IntThresh) {
-                LM_integral += LM_error;
-            } else {
-                LM_integral *= 0.9;
-            }
-            if (LM_integral > 400) {
-                LM_integral = 400;
-            } else if (LM_integral < -400) {
-                LM_integral = -400;
-            }
-            LM_effort += ((LM_error * LM_P) >> 2) +((LM_integral * LM_I) >> 5) + (((LM_lastSpeed - LM_Speed) * LM_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (LM_effort > 2000) {
-                // write 0
-                LM_effort = 2000;
-            } else if (LM_effort < 0) {
+            else if(LM_effort < 1){
                 LM_effort = 1;
             }
-        }
+            
+        } 
 
-        if (!(Status1 & LB_ENC_STAT)) {//
-        } else if (LB_PWM > 0) {
+        if (Status1 & LB_ENC_STAT) {
+            
+            if(LB_effort > 1300 && LB_effort < 2300){
+                if(last_LB_effort != LB_effort){//check for divide by zero condition
+                    LB_dir = (LB_Speed- LB_lastSpeed)/(LB_effort - last_LB_effort) ;//+((RB_Speed- RB_lastSpeed)/(RB_effort - last_RB_effort)- (RB_lastSpeed- RB_last_last_speed)/(last_RB_effort - last_last_RB_effort))/(RB_effort-last_last_RB_effort);// ds/de gives direction information    
+                }
+            }
+            else if (LB_effort <= 1300){//effort very small, speed is certainly negative
+                LB_dir = -1;
+            }
+            else if (LB_effort >= 2300){//effort very large, positive speed
+                LB_dir = 1;
+            }
+            else{
+                LB_dir = LB_reverse;
+            }
+            
+            if(LB_dir < 0) {
+                if(LB_Speed > 0){
+                    LB_Speed *= -1;
+                }
+                LB_reverse = -1;//save direction
+            }
+            else if(LB_dir == 0 && (LB_reverse==-1)){
+                if(LB_Speed>0){
+                    LB_Speed *= -1;
+                }//in special case when speed did not change, latch last direction
+            }
+            else{
+                if(LB_Speed < 0){
+                    LB_Speed *= -1; 
+                }
+                LB_reverse = 1; //save direction
+            }            
+            
+            
+            
             LB_error = LB_PWM - LB_Speed; // get error from difference
 
             if (abs(LB_error) > IntThresh) {
@@ -561,57 +595,33 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
                 LB_integral = -400;
             }
             LB_effort += ((LB_error * LB_P) >> 2) +((LB_integral * LB_I) >> 5) + (((LB_lastSpeed - LB_Speed) * LB_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (LB_effort < 2000) {
-                // write 0
-                LB_effort = 2000;
-            } else if (LB_effort > PR2) {
-                LB_effort = PR2 - 1;
+            
+            if(LB_effort > 3999){
+                LB_effort = 3999;
             }
-        } else {
-
-
-            if (LB_Speed > 0) {
-                LB_Speed *= -1;
-            }
-
-            LB_error = LB_PWM - LB_Speed; // get error from difference
-
-            if (abs(LB_error) > IntThresh) {
-                LB_integral += LB_error;
-            } else {
-                LB_integral *= 0.9;
-            }
-            if (LB_integral > 400) {
-                LB_integral = 400;
-            } else if (LB_integral < -400) {
-                LB_integral = -400;
-            }
-            LB_effort += ((LB_error * LB_P) >> 2) +((LB_integral * LB_I) >> 5) + (((LB_lastSpeed - LB_Speed) * LB_D) >> 2);
-
-            // drive outputs PWM duty cycle
-            if (LB_effort > 2000) {
-                // write 0
-                LB_effort = 2000;
-            } else if (LB_effort < 0) {
+            else if(LB_effort < 1){
                 LB_effort = 1;
             }
-        }
-
-
-
-
-
-
+            
+        } 
+        
+//        tft_fillRect(0,0,240,30, ILI9340_BLACK);
+//        tft_setTextColor(ILI9340_WHITE);
+//        tft_setTextSize(2);
+//        tft_setCursor(0,0);
+//        sprintf(buffer, "%d %d %d", LM_Speed, LM_effort, LM_PWM);
+//        tft_writeString(buffer);
+        
         LM_lastSpeed = LM_Speed;
         LB_lastSpeed = LB_Speed;
         LF_lastSpeed = LF_Speed;
-        SetDCOC4PWM(LM_effort);
-        SetDCOC1PWM(LF_effort);
+        last_LB_effort = LB_effort;
+        last_LM_effort = LM_effort;
+        last_LF_effort = LF_effort;
+        SetDCOC4PWM(LF_effort);
+        SetDCOC1PWM(LM_effort);
         SetDCOC5PWM(LB_effort);
         PT_YIELD_TIME_msec(20);
-
     }
     PT_END(pt);
 }
@@ -625,21 +635,21 @@ void __ISR(_EXTERNAL_1_VECTOR, ipl1) INT1Interrupt(void) {
     count_LF++;
 
     // clear interrupt flag
-    mINT0ClearIntFlag();
+    mINT1ClearIntFlag();
 }
-void __ISR(_EXTERNAL_2_VECTOR, ipl1) INT2Interrupt(void) {
+void __ISR(_EXTERNAL_2_VECTOR, ipl2) INT2Interrupt(void) {
     //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
     count_LB++;
 
     // clear interrupt flag
-    mINT0ClearIntFlag();
+    mINT2ClearIntFlag();
 }
-void __ISR(_EXTERNAL_4_VECTOR, ipl1) INT4Interrupt(void) {
+void __ISR(_EXTERNAL_4_VECTOR, ipl4) INT4Interrupt(void) {
     //tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
     count_LM++;
 
     // clear interrupt flag
-    mINT0ClearIntFlag();
+    mINT4ClearIntFlag();
 }
 void __ISR(_TIMER_3_VECTOR, ipl2) Timer3Handler(void) { 
     mT3ClearIntFlag();
@@ -679,6 +689,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         return;
     }
     if (IFS1bits.I2C1BIF) {
+        I2Cstate = 0;
         mI2C1BClearIntFlag();
         return;
     }
@@ -695,22 +706,50 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         byteReceved = 1;
         I2C1CONbits.SCLREL = 1; // release clock stretch bit
         
-        if( I2Cstate == 0 ){
+        if( I2Cstate == 0 && I2CDataIn != ADDR_CLR_I2C_STATE){
             I2Cstate = 1;
             I2C_request = I2CDataIn;
         }
         else if(I2Cstate == 1){
             switch(I2C_request){
                 case ADDR_ALL_PWM:
-                    if((I2CDataIn >> 7)){
-                        LF_PWM = (~I2CDataIn);//bitwise complement
-                        LM_PWM = LF_PWM;
-                        LB_PWM = LF_PWM;
-                    }
-                    else{
-                        LF_PWM = -1*(I2CDataIn);
-                        LM_PWM = LF_PWM;
-                        LB_PWM = LF_PWM;
+                    if ((I2CDataIn & 0x80)) {
+                        if(config1 & PID_EN){
+                            LF_PWM = ((~I2CDataIn)+1)<<1; //bitwise complement
+                            LM_PWM = LF_PWM;
+                            LB_PWM = LF_PWM;
+                        }
+                        else{
+                            LF_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
+                            if(LF_effort > 3999){
+                                LF_effort = 3999;
+                                LM_effort = 3999;
+                                LB_effort = 3999;                                
+                            }
+                            else{
+                                LM_effort = LF_effort;
+                                LB_effort = LF_effort;
+                            }
+                                    
+                        }                            
+                    } else {
+                        if(config1 & PID_EN){
+                            LF_PWM = -1 * (I2CDataIn);
+                            LM_PWM = LF_PWM;
+                            LB_PWM = LF_PWM;
+                        }
+                        else{
+                            LF_effort = 2000 - (((int)I2CDataIn)<<4);
+                            if(LF_effort < 1){
+                                LF_effort = 1;
+                                LM_effort = 1;
+                                LB_effort = 1;                                
+                            }
+                            else{
+                                LM_effort = LF_effort;
+                                LB_effort = LF_effort;
+                            }           
+                        } 
                     }
                     break;
                 case ADDR_ALL_P:
@@ -729,11 +768,27 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     LB_D = I2CDataIn;
                     break;                     
                 case ADDR_LF_PWM:
-                    if((I2CDataIn >> 7)){
-                        LF_PWM = (~I2CDataIn);
+                    if(config1 & PID_EN){
+                        if ((I2CDataIn >> 7)) {
+                            LF_PWM = ((~I2CDataIn)+1)<<1;
+                        } else {
+                            LF_PWM = -1 * (I2CDataIn);
+                        }
                     }
                     else{
-                        LF_PWM = -1*(I2CDataIn);
+                        if ((I2CDataIn >> 7)) {
+                            LF_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
+                            if(LF_effort > 3999){
+                                LF_effort = 3999;
+                            } 
+                        }
+                        else {
+                            LF_effort = 2000 - ((int)(I2CDataIn));
+                            if(LF_effort < 1){
+                                LF_effort = 1;
+                            }
+                        }
+                    
                     }
                     break;
                 case ADDR_LF_P:
@@ -747,11 +802,27 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     break;
                     
                 case ADDR_LM_PWM:
-                    if((I2CDataIn >> 7)){
-                        LM_PWM = (~I2CDataIn); 
+                    if(config1 & PID_EN){
+                        if ((I2CDataIn >> 7)) {
+                            LM_PWM = ((~I2CDataIn)+1)<<1;
+                        } else {
+                            LM_PWM = -1 * (I2CDataIn);
+                        }
                     }
                     else{
-                        LM_PWM = -1*(I2CDataIn);
+                        if ((I2CDataIn >> 7)) {
+                            LM_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
+                            if(LM_effort > 3999){
+                                LM_effort = 3999;
+                            } 
+                        }
+                        else {
+                            LM_effort = 2000 - ((int)(I2CDataIn));
+                            if(LM_effort < 1){
+                                LM_effort = 1;
+                            }
+                        }
+                    
                     }
                     break;
                 case ADDR_LM_P:
@@ -763,12 +834,28 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                 case ADDR_LM_D:
                     LM_D = I2CDataIn; 
                     break;
-                    case ADDR_LB_PWM:
-                    if((I2CDataIn >> 7)){
-                        LB_PWM = (~I2CDataIn); 
+                case ADDR_LB_PWM:
+                    if(config1 & PID_EN){
+                        if ((I2CDataIn >> 7)) {
+                            LB_PWM = ((~I2CDataIn)+1)<<1;
+                        } else {
+                            LB_PWM = -1 * (I2CDataIn);
+                        }
                     }
                     else{
-                        LB_PWM = -1*(I2CDataIn);
+                        if ((I2CDataIn >> 7)) {
+                            LB_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
+                            if(LB_effort > 3999){
+                                LB_effort = 3999;
+                            } 
+                        }
+                        else {
+                            LB_effort = 2000 - ((int)(I2CDataIn));
+                            if(LB_effort < 1){
+                                LB_effort = 1;
+                            }
+                        }
+                    
                     }
                     break;
                 case ADDR_LB_P:
@@ -811,7 +898,6 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
 }
 
 void InitI2C(void) {
-    unsigned char temp;
 
     CloseI2C1();
     
@@ -844,82 +930,88 @@ void main(void) {
     InitI2C();
 
     
-    ANSELA = 0; //make sure analog is cleared
-    ANSELB = 0;
-    AD1CON2 = 0;
+//    ANSELA = 0; //make sure analog is cleared
+//    ANSELB = 0;
+//    AD1CON2 = 0;
     mJTAGPortEnable(0);
-    
-    
+//    
+//    
     PT_setup();
-    RPA0R = 0;
-    RPA1R = 0;
-    CM2CON = 0;
-    CVRCON = 0x0000;
-    ANSELA = 0; //make sure analog is cleared
-    ANSELB = 0;
-    count = 0;
-    
-    mPORTASetPinsDigitalOut(BIT_2);
+//    RPA0R = 0;
+//    RPA1R = 0;
+//    CM2CON = 0;
+//    CVRCON = 0x0000;
+//    ANSELA = 0; //make sure analog is cleared
+//    ANSELB = 0;
+//    count = 0;
+//    
+//    mPORTASetPinsDigitalOut(BIT_2);
     mPORTBSetPinsDigitalOut(BIT_2 | BIT_3);    
-    
+//    
     RPB2R = 0x05;  // OC 4
     RPB3R = 0x05;  // OC 1
     RPA2R = 0x06; // OC 5
-    
-
-
-
+//    
+//
+//
+//
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_256, 4000);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
     
     OpenTimer3(T3_ON|T3_SOURCE_INT| T3_PS_1_8, 4000);
     ConfigIntTimer3(T3_INT_OFF | T3_INT_PRIOR_2);
-
-
-    // set up OC for PWM
+//
+//
+//    // set up OC for PWM
     ConfigIntOC1(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC1(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LF pin 6
+    OpenOC1(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LM pin 6
     ConfigIntOC4(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
-    OpenOC4(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LM pin 7
+    OpenOC4(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LF pin 7
     ConfigIntOC5(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
     OpenOC5(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LB pin 9
-
-    mPORTBSetPinsDigitalIn(BIT_4);
-    mPORTASetPinsDigitalIn(BIT_3 | BIT_4);
-    
+//
+//    mPORTBSetPinsDigitalIn(BIT_4);
+////    mPORTASetPinsDigitalIn(BIT_3 | BIT_4);
+//    
     INT1R = 0; //pin 10, LF_ENC
     INT4R = 0x02; //pin 11, LM_ENC
     INT2R = 0x02; //pin 12, LB_ENC
-    
-
-    mINT1IntEnable(TRUE);
-    mINT1SetIntPriority(INT_PRIORITY_LEVEL_1);
-    mINT2IntEnable(TRUE);
-    mINT2SetIntPriority(INT_PRIORITY_LEVEL_2);
-    mINT4IntEnable(TRUE);
-    mINT4SetIntPriority(INT_PRIORITY_LEVEL_3);
-    
-    // init the threads
-
+//    
+    ConfigINT1(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_1);
+    ConfigINT2(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_2);
+    ConfigINT4(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_4);
+//
+//    
+//    // init the threads
+//
     PT_INIT(&pt_pid);
     PT_INIT(&pt_ENC);
     LF_PWM = 0;
     LM_PWM = 0;
     LB_PWM = 0;
-    
+//    
     LF_effort = 2000;
     LM_effort = 2000;
     LB_effort = 2000;
-    SetDCOC4PWM(LM_effort);
-    SetDCOC1PWM(LF_effort);
+    SetDCOC4PWM(LF_effort);
+    SetDCOC1PWM(LM_effort);
     SetDCOC5PWM(LB_effort);
+//    tft_init_hw();
+//    tft_begin();
+//    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
+//    tft_fillRect( 80, 80, 10, 10, ILI9340_BLUE);
+
     INTEnableSystemMultiVectoredInt();
-    
     //round robin thread schedule
     while (1) {
         if(config1 & PID_EN){
-            PT_SCHEDULE(protothread_ENC(&pt_ENC));
+//            PT_SCHEDULE(protothread_ENC(&pt_ENC));
             PT_SCHEDULE(protothread_pid(&pt_pid));
+        }
+        else{
+            SetDCOC4PWM(LF_effort);
+            SetDCOC1PWM(LM_effort);
+            SetDCOC5PWM(LB_effort);
         }
     }
 } // main
