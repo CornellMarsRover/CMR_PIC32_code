@@ -28,7 +28,7 @@ char buffer[60]; // string buffer
 
 
 
-static unsigned char I2CDataIn;
+static int I2CDataIn;
 static unsigned char config1 = 0x88;
 static unsigned char Status1 = 0xFF;
 static unsigned char Status2 = 0x00;
@@ -51,6 +51,7 @@ static unsigned int Bat_Cutoff;
 
 
 //Config
+#define ADDR_CLR_I2C_STATE 0xFF
 #define ADDR_Config1  0x00 
 /* BIT7(MSB) = CUR_Sense_EN
  * 
@@ -81,6 +82,9 @@ static unsigned int Bat_Cutoff;
  *
  * Default state of config1 = 0x88
  */
+#define CUR_SENSE_EN 0x80
+#define MOTOR_HALT 0x20
+
 
 //Read-only
 #define ADDR_Status1  0x01
@@ -107,6 +111,11 @@ Default state of register = 0xFF
 
 Default state of register = 0x00
  */
+#define M7_CUR 0x80
+#define M6_CUR 0x40
+#define M5_CUR 0x20
+#define M4_CUR 0x10
+#define M3_CUR 0x08
 
 //Motor addresses
 #define ADDR_M3_PWM 0x10
@@ -234,9 +243,9 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         mI2C1MClearIntFlag();
         return;
     }
-    if (IFS1bits.I2C1BIF) {
+    if (IFS1bits.I2C1BIF) {//bus collision, reset I2C state machine
+        I2Cstate = 0;
         mI2C1BClearIntFlag();
-        
         return;
     }
 
@@ -252,111 +261,120 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         I2CDataIn = SlaveReadI2C1();
         I2C1CONbits.SCLREL = 1; // release clock stretch bit
         
-        if( I2Cstate == 0 ){
+        if( I2Cstate == 0 && I2CDataIn != ADDR_CLR_I2C_STATE){
             I2Cstate = 1;
             I2C_request = I2CDataIn;
         }
         else if(I2Cstate == 1){
             switch(I2C_request){
                 case ADDR_ALL_PWM:
-                    SetDCOC1PWM(I2CDataIn<<3);
-					SetDCOC2PWM(I2CDataIn<<3);
-					SetDCOC3PWM(I2CDataIn<<3);
-					SetDCOC4PWM(I2CDataIn<<3);
-					SetDCOC5PWM(I2CDataIn<<3);
-					M3_PWM = I2CDataIn<<3;
-					M4_PWM = I2CDataIn<<3;
-					M5_PWM = I2CDataIn<<3;
-					M6_PWM = I2CDataIn<<3;
-					M7_PWM = I2CDataIn<<3;
+                    if (I2CDataIn & 0x80) {
+						mPORTBClearBits(BIT_13|BIT_14|BIT_15|BIT_11|BIT_7);
+                        M3_PWM = (((int)((~I2CDataIn)+1))<<4);
+                        M4_PWM = M3_PWM;
+                        M5_PWM = M3_PWM;
+                        M6_PWM = M3_PWM;
+                        M7_PWM = M3_PWM;
+
+                    } else {
+                        mPORTBSetBits(BIT_13);
+                        M3_PWM = ((int)I2CDataIn) << 4;
+                        M4_PWM = M3_PWM;
+                        M5_PWM = M3_PWM;
+                        M6_PWM = M3_PWM;
+                        M7_PWM = M3_PWM;
+                    }
+                    SetDCOC1PWM(M3_PWM);
+					SetDCOC2PWM(M6_PWM);
+					SetDCOC3PWM(M5_PWM);
+					SetDCOC4PWM(M3_PWM);
+					SetDCOC5PWM(M4_PWM);
                     break;
 
                 case ADDR_M3_PWM :
 
-                    if (((Status2 & 0x08) && (config1 & 0x80)) || (config1 & 0x20)) {
+                    if (((Status2 & M3_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
                         M3_PWM = 0;
                     }
                     else{
-                    if (I2CDataIn | 0x80) {
+                    if (I2CDataIn & 0x80) {
 						mPORTBClearBits(BIT_13);
-                        M3_PWM = ((~I2CDataIn)+1)<<3;
+                        M3_PWM = (((int)((~I2CDataIn)+1))<<4);
 
                     } else {
                         mPORTBSetBits(BIT_13);
-                        M3_PWM = I2CDataIn << 3;
+                        M3_PWM = ((int)I2CDataIn) << 4;
                     }
                     }
                     SetDCOC4PWM(M3_PWM);
                     break;
                 case ADDR_M4_PWM:
-                    if (((Status2 & 0x10) && (config1 & 0x80)) || (config1 & 0x20)) {
+                    if (((Status2 & M4_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
                         M4_PWM = 0;
                     }
                     else{
-                    if (I2CDataIn | 0x80) {
+                    if (I2CDataIn & 0x80) {
 						mPORTBClearBits(BIT_14);
-                        M4_PWM = ((~I2CDataIn)+1)<<3;
-                        SetDCOC4PWM(M3_PWM);
+                        M4_PWM = (((int)((~I2CDataIn)+1))<<4);
 
                     } else {
                         mPORTBSetBits(BIT_14);
-                        M4_PWM = I2CDataIn << 3;
-                        SetDCOC4PWM(M3_PWM);
+                        M4_PWM = ((int)I2CDataIn) << 4;
                     }
                     }
 					SetDCOC5PWM(M4_PWM);
                     break;
                 case ADDR_M5_PWM:
-                    if (((Status2 & 0x20) && (config1 & 0x80)) || (config1 & 0x20)) {
+                    if (((Status2 & M5_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
                         M5_PWM = 0;
                     }
                     else{
-                    if (I2CDataIn | 0x80) {
+                    if (I2CDataIn & 0x80) {
 						mPORTBClearBits(BIT_15);
-                        M5_PWM = ((~I2CDataIn)+1)<<3;
+                        M5_PWM = (((int)((~I2CDataIn)+1))<<4);
 
                     } else {
                         mPORTBSetBits(BIT_15);
-                        M5_PWM = I2CDataIn << 3;
+                        M5_PWM = ((int)I2CDataIn) << 4;
                     }
                     }
 					SetDCOC3PWM(M5_PWM);
                     break;                     
                 case ADDR_M6_PWM:                   
-                    if (((Status2 & 0x40) && (config1 & 0x80)) || (config1 & 0x20)) {
+                    if (((Status2 & M6_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
                         M6_PWM = 0;
                     }
                     else{
-                    if (I2CDataIn | 0x80) {
+                    if (I2CDataIn & 0x80) {
 						mPORTBClearBits(BIT_11);
-                        M6_PWM = ((~I2CDataIn)+1)<<3;
+                        M6_PWM = (((int)((~I2CDataIn)+1))<<4);
 
                     } else {
                         mPORTBSetBits(BIT_11);
-                        M6_PWM = I2CDataIn << 3;
+                        M6_PWM = ((int)I2CDataIn) << 4;
                     }
                     }
 					SetDCOC2PWM(M6_PWM);
                     break;
                 case ADDR_M7_PWM:
-                    if (((Status2 & 0x80) && (config1 & 0x80)) || (config1 & 0x20)) {
+                    if (((Status2 & M7_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
                         M7_PWM = 0;
                     }
                     else{
-                    if (I2CDataIn | 0x80) {
-						mPORTBClearBits(BIT_7);
-                        M7_PWM = ((~I2CDataIn)+1)<<3;
+                    if (I2CDataIn & 0x80) {
+			mPORTBClearBits(BIT_7);
+                        M7_PWM = (((int)((~I2CDataIn)+1))<<4);
 
                     } else {
                         mPORTBSetBits(BIT_7);
-                        M7_PWM = I2CDataIn << 3;
+                        M7_PWM = ((int)I2CDataIn) << 4;
                     }
                     }
 					SetDCOC1PWM(M7_PWM);
                     break;				
                 case ADDR_Config1:
                     config1 = I2CDataIn;
-					if(config1 & 0x40){
+					if(config1 & MOTOR_HALT){
 						SetDCOC1PWM(0);
 						SetDCOC2PWM(0);
 						SetDCOC3PWM(0);
@@ -399,8 +417,6 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
 }
 
 void InitI2C(void) {
-    unsigned char temp;
-
     CloseI2C1();
     
     // Enable the I2C module with clock stretching enabled
