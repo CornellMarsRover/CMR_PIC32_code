@@ -22,7 +22,7 @@ char buffer[60]; // string buffer
 //static int speedTarget; // target fan speed
 
 
-#define I2CBAUD 10000 //clock operating at 10kHz
+#define I2CBAUD 100000 //clock operating at 10kHz
 #define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
 #define I2CAddress 0x1C
 
@@ -700,6 +700,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         // perform a dummy read
         temp = SlaveReadI2C1();
         I2C1CONbits.SCLREL = 1; // release the clock
+        I2Cstate = 0;
     } else if ((I2C1STATbits.R_W == 0) && (I2C1STATbits.D_A == 1)) {//data received, input to slave
         // writing data to our module
         I2CDataIn = SlaveReadI2C1();
@@ -716,6 +717,9 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     if ((I2CDataIn & 0x80)) {
                         if(config1 & PID_EN){
                             LF_PWM = ((~I2CDataIn)+1)<<1; //bitwise complement
+                            if(LF_PWM > 150){
+                                LF_PWM = 150;
+                            }
                             LM_PWM = LF_PWM;
                             LB_PWM = LF_PWM;
                         }
@@ -735,6 +739,9 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     } else {
                         if(config1 & PID_EN){
                             LF_PWM = -1 * (I2CDataIn);
+                            if(LF_PWM < -150){
+                                LF_PWM = -150;
+                            }
                             LM_PWM = LF_PWM;
                             LB_PWM = LF_PWM;
                         }
@@ -771,8 +778,14 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     if(config1 & PID_EN){
                         if ((I2CDataIn >> 7)) {
                             LF_PWM = ((~I2CDataIn)+1)<<1;
+                            if(LF_PWM>150){
+                                LF_PWM = 150;
+                            }
                         } else {
                             LF_PWM = -1 * (I2CDataIn);
+                            if(LF_PWM<-150){
+                                LF_PWM = -150;
+                            }
                         }
                     }
                     else{
@@ -805,8 +818,14 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     if(config1 & PID_EN){
                         if ((I2CDataIn >> 7)) {
                             LM_PWM = ((~I2CDataIn)+1)<<1;
+                            if(LM_PWM > 150){
+                                LM_PWM = 150;
+                            }
                         } else {
                             LM_PWM = -1 * (I2CDataIn);
+                            if(LM_PWM < -150){
+                                LM_PWM = -150;
+                            }
                         }
                     }
                     else{
@@ -838,8 +857,14 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     if(config1 & PID_EN){
                         if ((I2CDataIn >> 7)) {
                             LB_PWM = ((~I2CDataIn)+1)<<1;
+                            if(LB_PWM > 150){
+                                LB_PWM = 150;
+                            }
                         } else {
                             LB_PWM = -1 * (I2CDataIn);
+                            if(LB_PWM < -150){
+                                LB_PWM = -150;
+                            }
                         }
                     }
                     else{
@@ -903,7 +928,7 @@ void InitI2C(void) {
     
     // Enable the I2C module with clock stretching enabled
     // define a Master BRG of 400kHz although this is not used by the slave
-    OpenI2C1(I2C_SLW_DIS | I2C_ON | I2C_7BIT_ADD | I2C_STR_EN|I2C_SM_DIS, BRG_VAL); //48);
+    OpenI2C1(I2C_SLW_DIS | I2C_ON | I2C_7BIT_ADD | I2C_STR_DIS|I2C_SM_EN, BRG_VAL); //48);
 //    I2C1BRG = BRG_VAL;
 //    I2C1CON = 0xD040;
 //    I2C1CON &= !I2C_SM_EN;
@@ -996,10 +1021,10 @@ void main(void) {
     SetDCOC4PWM(LF_effort);
     SetDCOC1PWM(LM_effort);
     SetDCOC5PWM(LB_effort);
-//    tft_init_hw();
-//    tft_begin();
-//    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
-//    tft_fillRect( 80, 80, 10, 10, ILI9340_BLUE);
+    tft_init_hw();
+    tft_begin();
+    tft_setRotation(0);
+    tft_fillScreen(BLACK); //240x320 vertical display
 
     INTEnableSystemMultiVectoredInt();
     //round robin thread schedule
@@ -1013,6 +1038,8 @@ void main(void) {
             SetDCOC1PWM(LM_effort);
             SetDCOC5PWM(LB_effort);
         }
+        I2C1CONbits.SCLREL = 1; // release the clock
+
     }
 } // main
 
