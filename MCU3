@@ -344,6 +344,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         // perform a dummy read
         temp = SlaveReadI2C1();
         I2C1CONbits.SCLREL = 1; // release the clock
+        I2Cstate = 0;
     } else if ((I2C1STATbits.R_W == 0) && (I2C1STATbits.D_A == 1)) {//data received, input to slave
         // writing data to our module
         I2CDataIn = SlaveReadI2C1();
@@ -705,6 +706,7 @@ void main(void) {
         PT_SCHEDULE(protothread_I2C(&pt_I2C));
         //        PT_SCHEDULE(protothread_CSense(&pt_CSense));
         //        PT_SCHEDULE(protothread_anim(&pt_anim));
+        I2C1CONbits.SCLREL = 1; // release the clock
     }
 } // main
 
