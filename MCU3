@@ -18,6 +18,8 @@
 #include "tft_gfx.h"
 #include "tft_master.h"
 #include "Adafruit_BNO055.h"
+#include "I2C_Reg_defs.h"
+
 
 char buffer[60]; // string buffer
 //static int speedTarget; // target fan speed
@@ -25,7 +27,7 @@ char buffer[60]; // string buffer
 
 #define I2CBAUD 20000 //clock operating at 10kHz
 #define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
-#define I2CAddress 0x1D
+//#define I2CAddress 0x1E
 
 
 
@@ -123,8 +125,8 @@ Default state of register = 0x00
 //Motor addresses
 #define ADDR_M1_PWM 0x10
 #define ADDR_M2_PWM 0x11
-#define ADDR_SERVO1_PWM 0x12 //pan
-#define ADDR_SERVO2_PWM 0x13 //tilt
+#define ADDR_SERVO1_PWM 0x12 //tilt
+#define ADDR_SERVO2_PWM 0x13 //pan
 
 
 
@@ -184,14 +186,14 @@ typedef signed int fix16;
 
 #define MIN_SERVO_DUTY       3000
 #define MAX_SERVO_DUTY      50000
-#define NEUTRAL_SERVO_DUTY   3750
-#define cowabunga   YOLO
-#define matthaias SWAGDADDY
-static signed char Servo1_PWM; 
+#define NEUTRAL_SERVO2_DUTY 3750
+#define MAX_SERVO1_DUTY 2150
+static int Servo1_PWM = 200; 
 static signed char Servo2_PWM;
 static unsigned char servo1_ON; //1 if high, 0 if low
 static unsigned char servo2_ON; 
-#define SERVO_PER_UNIT 16 //15.6; 500 = 0.1 ms
+#define SERVO2_PER_UNIT 16 //15.6; 500 = 0.1 ms
+#define SERVO1_PER_UNIT 6 //
 
 static struct pt pt_ADC, pt_CSense, pt_I2C;
 
@@ -412,11 +414,9 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     Status2 = I2CDataIn;
                     break;
                 case ADDR_SERVO1_PWM:
-                    Servo1_PWM = I2CDataIn;
-                    if (I2CDataIn & 0x80) {
-                        Servo1_PWM = -1*((int) ((~I2CDataIn) + 1));
-                    } else {
-                        Servo1_PWM = (I2CDataIn);
+                    Servo1_PWM = *(unsigned char*)(&I2CDataIn);
+                    if(Servo1_PWM > 200){
+                        Servo1_PWM = 200;
                     }
                     break;
                 case ADDR_SERVO2_PWM:
@@ -549,7 +549,7 @@ void __ISR( _TIMER_3_VECTOR, ipl3) T3Interrupt( void){
         mPORTAClearBits(BIT_3);
     }
     else { 
-        WritePeriod3(NEUTRAL_SERVO_DUTY + Servo1_PWM * SERVO_PER_UNIT);
+        WritePeriod3(MAX_SERVO1_DUTY - (Servo1_PWM<<2));
         servo1_ON = 1;
         mPORTASetBits(BIT_3);
     }
@@ -564,7 +564,7 @@ void __ISR( _TIMER_4_VECTOR, ipl3) T4Interrupt( void){
         mPORTBClearBits(BIT_4);
     }
     else {
-        WritePeriod4(NEUTRAL_SERVO_DUTY + Servo2_PWM * SERVO_PER_UNIT);
+        WritePeriod4(NEUTRAL_SERVO2_DUTY + Servo2_PWM * SERVO2_PER_UNIT);
         servo2_ON = 1;
         mPORTBSetBits(BIT_4);
     }
