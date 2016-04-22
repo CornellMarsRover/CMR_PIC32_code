@@ -17,20 +17,24 @@
 // graphics libraries
 #include "tft_gfx.h"
 #include "tft_master.h"
+#include "SD_Card.h"
+#include "PWM_logic.h"
+#include "I2C_Reg_defs.h"
+
 
 char buffer[60]; // string buffer
 //static int speedTarget; // target fan speed
 
 
-#define I2CBAUD 100000 //clock operating at 10kHz
-#define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
-#define I2CAddress 0x1C
+//#define I2CBAUD 100000 //clock operating at 10kHz
+//#define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
+//#define I2CAddress 0x1C
 
 
 
 static char I2CDataIn;
 static unsigned char byteReceved;
-static unsigned char config1 = 0x8E;
+static unsigned char config1 = 0x0E;
 static unsigned char Status1 = 0xFF;
 static int LF_PWM;
 static unsigned char LF_P = 8;
@@ -56,103 +60,102 @@ static unsigned char Hum_sense;
 //---I2C Register Addresses---
 
 
-//Config
-#define ADDR_CLR_I2C_STATE 0xFF
-#define ADDR_Config1  0x00 
-#define PID_EN 0x80
-/* BIT7(MSB) = PID_EN
- * 
- * PID_EN - If enabled, PWM addresses represent target speeds, if
- * disabled, they will be interpreted as duty cycles. Note: in all cases, motor
- * speed/effort is set with a signed 8-bit number
- * 
- * BIT6 = LowPowerShutoff_EN
- * 
- * LowPowerShutoff_EN - MCU will halt all motors if low battery signal recieved
- * 
- * BIT5 = MOTOR_HALT
- * 
- * MOTOR_HALT - MCU will halt all motors
- * 
- * BIT4 = RAMP_DOWN_EN
- * 
- * RAMP_DOWN_EN - MCU will set a maximum speed delta; any speed changes
- * that exceed this delta will be done gradually rather than
- * instantaneously
- * 
- * BIT3 = MCU_TIMEOUT_EN
- * 
- * MCU_TIMEOUT - MCU will set all motor efforts to 0 if no command has been received 
- * for 2 seconds
- * 
- * BIT2 = 6_WHEEL_EN
- * 
- * 6_WHEEL_EN - when bit is set, all 6 wheels are used, otherwise only 4 are in use
- * 
- * Default state of config1 = 0x8E
- */
-#define SIX_WHEEL_EN    0x02
-
-//Read-only
-#define ADDR_Status1  0x01
-/*
- * BIT7(MSB) = LF_ENC_STAT
- * BIT6 =LM_ENC_STAT
- * BIT5 = LB_ENC_STAT
- * 
- * XX_ENC_STAT - Bit indicates if the encoder for the given motor is
- * connected, 1 for connected, 0 for disconnected
- * 
- * BIT4 = LF_STALL
- * BIT3 = LM_STALL
- * BIT2 = LB_STALL
- * 
- * XX_STALL - Bit indicates if the given motor has stalled, i.e. it is
- * being given a sufficiently high PWM duty cycle, but is still not
- * moving. This may also indicate an improper connection to the motor. 0
- * if stalled, 1 if nominal
- * 
- * BIT1 = BAT_CUTOFF
- * 
- * BAT_CUTOFF - Bit indicates the rover's battery is running low, 1 if
- * nominal, 0 if low
-
-Default state of register = 0xFF
- */
-#define LF_ENC_STAT 0x80
-#define LM_ENC_STAT 0x40
-#define LB_ENC_STAT 0x20
-
-
-//Motor addresses
-#define ADDR_LF_PWM 0x10 //NOTE, motor speeds are signed, 2s compliment numbers
-#define ADDR_LF_P 0x11
-#define ADDR_LF_I 0x12
-#define ADDR_LF_D 0x13
-#define ADDR_LM_PWM 0x14
-#define ADDR_LM_P 0x15
-#define ADDR_LM_I 0x16
-#define ADDR_LM_D 0x17
-#define ADDR_LB_PWM 0x18
-#define ADDR_LB_P 0x19
-#define ADDR_LB_I 0x1A
-#define ADDR_LB_D 0x1B
-
-//Motor Bank Addresses
-#define ADDR_ALL_PWM 0x20 //NOTE, motor speeds are signed, 2s compliment numbers
-#define ADDR_ALL_P  0x21
-#define ADDR_ALL_I  0x22
-#define ADDR_ALL_D  0x23
-#define ADDR_HALT  0x2F
-
-
-//----Read-only addresses----
-
-#define ADDR_LF_SPEED 0x30 //NOTE, motor speeds are signed, 2s compliment numbers
-#define ADDR_LM_SPEED 0x31
-#define ADDR_LB_SPEED 0x32
-#define ADDR_BAT_LVL 0x33
-#define ADDR_HUM_SENSE 0x34
+////Config
+//#define ADDR_CLR_I2C_STATE 0xFF
+//#define ADDR_Config1  0x00 
+///* BIT7(MSB) = PID_EN
+// * 
+// * PID_EN - If enabled, PWM addresses represent target speeds, if
+// * disabled, they will be interpreted as duty cycles. Note: in all cases, motor
+// * speed/effort is set with a signed 8-bit number
+// * 
+// * BIT6 = LowPowerShutoff_EN
+// * 
+// * LowPowerShutoff_EN - MCU will halt all motors if low battery signal recieved
+// * 
+// * BIT5 = MOTOR_HALT
+// * 
+// * MOTOR_HALT - MCU will halt all motors
+// * 
+// * BIT4 = RAMP_DOWN_EN
+// * 
+// * RAMP_DOWN_EN - MCU will set a maximum speed delta; any speed changes
+// * that exceed this delta will be done gradually rather than
+// * instantaneously
+// * 
+// * BIT3 = MCU_TIMEOUT_EN
+// * 
+// * MCU_TIMEOUT - MCU will set all motor efforts to 0 if no command has been received 
+// * for 2 seconds
+// * 
+// * BIT2 = 6_WHEEL_EN
+// * 
+// * 6_WHEEL_EN - when bit is set, all 6 wheels are used, otherwise only 4 are in use
+// * 
+// * Default state of config1 = 0x8E
+// */
+//#define SIX_WHEEL_EN    0x02
+//
+////Read-only
+//#define ADDR_Status1  0x01
+///*
+// * BIT7(MSB) = LF_ENC_STAT
+// * BIT6 =LM_ENC_STAT
+// * BIT5 = LB_ENC_STAT
+// * 
+// * XX_ENC_STAT - Bit indicates if the encoder for the given motor is
+// * connected, 1 for connected, 0 for disconnected
+// * 
+// * BIT4 = LF_STALL
+// * BIT3 = LM_STALL
+// * BIT2 = LB_STALL
+// * 
+// * XX_STALL - Bit indicates if the given motor has stalled, i.e. it is
+// * being given a sufficiently high PWM duty cycle, but is still not
+// * moving. This may also indicate an improper connection to the motor. 0
+// * if stalled, 1 if nominal
+// * 
+// * BIT1 = BAT_CUTOFF
+// * 
+// * BAT_CUTOFF - Bit indicates the rover's battery is running low, 1 if
+// * nominal, 0 if low
+//
+//Default state of register = 0xFF
+// */
+//#define LF_ENC_STAT 0x80
+//#define LM_ENC_STAT 0x40
+//#define LB_ENC_STAT 0x20
+//
+//
+////Motor addresses
+//#define ADDR_LF_PWM 0x10 //NOTE, motor speeds are signed, 2s compliment numbers
+//#define ADDR_LF_P 0x11
+//#define ADDR_LF_I 0x12
+//#define ADDR_LF_D 0x13
+//#define ADDR_LM_PWM 0x14
+//#define ADDR_LM_P 0x15
+//#define ADDR_LM_I 0x16
+//#define ADDR_LM_D 0x17
+//#define ADDR_LB_PWM 0x18
+//#define ADDR_LB_P 0x19
+//#define ADDR_LB_I 0x1A
+//#define ADDR_LB_D 0x1B
+//
+////Motor Bank Addresses
+//#define ADDR_ALL_PWM 0x20 //NOTE, motor speeds are signed, 2s compliment numbers
+//#define ADDR_ALL_P  0x21
+//#define ADDR_ALL_I  0x22
+//#define ADDR_ALL_D  0x23
+//#define ADDR_HALT  0x2F
+//
+//
+////----Read-only addresses----
+//
+//#define ADDR_LF_SPEED 0x30 //NOTE, motor speeds are signed, 2s compliment numbers
+//#define ADDR_LM_SPEED 0x31
+//#define ADDR_LB_SPEED 0x32
+//#define ADDR_BAT_LVL 0x33
+//#define ADDR_HUM_SENSE 0x34
 
 
 //// command array
@@ -160,41 +163,10 @@ static char cmd[30];
 static int value;
 static int count;
 
-// === the fixed point macros ========================================
-typedef signed int fix16;
-#define multfix16(a,b) ((fix16)(((( signed long long)(a))*(( signed long long)(b)))>>16)) //multiply two fixed 16:16
-#define float2fix16(a) ((fix16)((a)*65536.0)) // 2^16
-#define fix2float16(a) ((float)(a)/65536.0)
-#define fix2int16(a)    ((int)((a)>>16))
-#define int2fix16(a)    ((fix16)((a)<<16))
-#define divfix16(a,b) ((fix16)((((signed long long)(a)<<16)/(b))))
-#define sqrtfix16(a) (float2fix16(sqrt(fix2float16(a))))
-#define absfix16(a) abs(a)
 
-// UART parameters
-#define BAUDRATE 9600 // must match PC end
-#define PB_DIVISOR (1 << OSCCONbits.PBDIV) // read the peripheral bus divider, FPBDIV
-#define PB_FREQ SYS_FREQ/PB_DIVISOR // periperhal bus frequency
-
-// useful ASCII/VT100 macros for PuTTY
-#define clrscr() printf( "\x1b[2J")
-#define home()   printf( "\x1b[H")
-#define pcr()    printf( '\r')
-#define crlf     putchar(0x0a); putchar(0x0d);
-#define max_chars 50 // for input buffer
-
-#define FOSC 60E6
-#define PB_DIV 8
-#define PRESCALE 256
-#define T1_TICK (FOSC/PB_DIV/PRESCALE*64)
-
-#define CONFIG (CN_ON | CN_IDLE_CON)
-#define PINS (CN15_ENABLE)
-#define PULLUPS (CN_PULLUP_DISABLE_ALL)
-
-#define LF_ENC_MASK 0x08
-#define LM_ENC_MASK 0x10
-#define LB_ENC_MASK 0x10
+//#define LF_ENC_MASK 0x08
+//#define LM_ENC_MASK 0x10
+//#define LB_ENC_MASK 0x10
 
 static int LF_error;
 static int LF_integral;
@@ -219,17 +191,42 @@ static int IntThresh = 0;
 //// thread control structs
 static struct pt pt_uart, pt_pid, pt_anim, pt_input, pt_output, pt_DMA_output, pt_ENC;
 
+static PT_THREAD(protothread_Anim(struct pt *pt)){
+    PT_BEGIN(pt);
+    while(1){
+        tft_fillRect(250,0,70,200, BLACK);
+        tft_setRotation(1);
+        tft_setCursor(0,0);
+        tft_setTextSize(3);
+        tft_setTextColor(WHITE);
+        sprintf(buffer, "Speed target: %d", LB_PWM );
+        tft_writeString(buffer);
+        tft_setCursor(0,50);
+        sprintf(buffer, "Motor effort: %d", LB_effort );        
+        tft_writeString(buffer);
+        tft_setCursor(0,100);
+        sprintf(buffer, "Motor speed:  %d", LB_Speed );        
+        tft_writeString(buffer);
+        tft_setCursor(0,150);
+        sprintf(buffer, "Error:        %d", LB_error );        
+        tft_writeString(buffer);
+        
+        PT_YIELD_TIME_msec(100);
+    }
+    
+    PT_END(pt);
+}
 
 static int ENC_TEST_THRESHOLD = 1000;
 static PT_THREAD(protothread_ENC(struct pt *pt)){
     PT_BEGIN(pt);
     while(1){
-        if (!(Status1 & LF_ENC_STAT)) {//if encoder already unplugged
-            if ((Status1 & LB_ENC_STAT) && ((config1 & SIX_WHEEL_EN) && (Status1 & LM_ENC_STAT))) {//if 
+        if (!(Status1 & F_ENC_STAT)) {//if encoder already unplugged
+            if ((Status1 & B_ENC_STAT) && ((config1 & SIX_WHEEL_EN) && (Status1 & M_ENC_STAT))) {//if 
                 LF_effort = (LM_effort + LB_effort) >> 1; //set speed to average of remaining motors
-            } else if ((config1 & SIX_WHEEL_EN) && (Status1 & LM_ENC_STAT)) {
+            } else if ((config1 & SIX_WHEEL_EN) && (Status1 & M_ENC_STAT)) {
                 LF_effort = LM_effort;
-            } else if ((Status1 & LB_ENC_STAT)) {
+            } else if ((Status1 & B_ENC_STAT)) {
                 LF_effort = LB_effort;
             } else {
                 LF_effort = 2000;
@@ -239,25 +236,25 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
             CNPDA &= !LF_ENC_MASK;
             PT_YIELD_TIME_msec(1);
             if (!(PORTA & LF_ENC_MASK)) {//if not pulled high
-                Status1 |= LF_ENC_STAT;
+                Status1 |= F_ENC_STAT;
                 CNPUA &= !LF_ENC_MASK;
             } else {
                 CNPDA |= LF_ENC_MASK; //pull-down
                 CNPUA &= !LF_ENC_MASK;
                 PT_YIELD_TIME_msec(1);
                 if (PORTA & LF_ENC_MASK) {
-                    Status1 |= LF_ENC_STAT;
+                    Status1 |= F_ENC_STAT;
                     CNPDA &= !LF_ENC_MASK;
                 }
 
             }
         }
-        if (!(Status1 & LM_ENC_STAT)) {//if encoder already unplugged
-            if ((Status1 & LF_ENC_STAT) && ((Status1 & LB_ENC_STAT))) {//if 
+        if (!(Status1 & M_ENC_STAT)) {//if encoder already unplugged
+            if ((Status1 & F_ENC_STAT) && ((Status1 & B_ENC_STAT))) {//if 
                 LM_effort = (LM_effort + LB_effort) >> 1; //set speed to average of remaining motors
-            } else if ((Status1 & LB_ENC_STAT)) {
+            } else if ((Status1 & B_ENC_STAT)) {
                 LM_effort = LB_effort;
-            } else if ((Status1 & LF_ENC_STAT)) {
+            } else if ((Status1 & F_ENC_STAT)) {
                 LM_effort = LF_effort;
 
             } else {
@@ -268,22 +265,22 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
             CNPDB &= !LM_ENC_MASK;
             PT_YIELD_TIME_msec(1);
             if (!(PORTB & LM_ENC_MASK)) {//if not pulled high
-                Status1 |= LM_ENC_STAT;
+                Status1 |= M_ENC_STAT;
                 CNPUB &= !LM_ENC_MASK;
             } else {
                 CNPDB |= LM_ENC_MASK; //pull-down
                 CNPUB &= !LM_ENC_MASK;
                 PT_YIELD_TIME_msec(1);
                 if (PORTB & LM_ENC_MASK) {
-                    Status1 |= LM_ENC_STAT;
+                    Status1 |= M_ENC_STAT;
                     CNPDB &= !LM_ENC_MASK;
 
                 }
 
             }
         }
-        if (!(Status1 & LB_ENC_STAT)) {//if encoder already unplugged
-            if ((Status1 & LF_ENC_STAT) && ((Status1 & LM_ENC_STAT) && (config1 & SIX_WHEEL_EN))) {//if 
+        if (!(Status1 & B_ENC_STAT)) {//if encoder already unplugged
+            if ((Status1 & F_ENC_STAT) && ((Status1 & M_ENC_STAT) && (config1 & SIX_WHEEL_EN))) {//if 
                 LB_effort = (LM_effort + LF_effort) >> 1; //set speed to average of remaining motors
             } else if ((Status1 & 0x40)&&(config1 & 0x02)) {
                 LB_effort = LM_effort;
@@ -298,14 +295,14 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
             CNPDA &= !LB_ENC_MASK;
             PT_YIELD_TIME_msec(1);
             if (!(PORTA & LB_ENC_MASK)) {//if not pulled high
-                Status1 |= LB_ENC_STAT;
+                Status1 |= B_ENC_STAT;
                 CNPUA &= !LB_ENC_MASK;
             } else {
                 CNPDA |= LB_ENC_MASK; //pull-down
                 CNPUA &= !LB_ENC_MASK;
                 PT_YIELD_TIME_msec(1);
                 if (PORTA & LB_ENC_MASK) {
-                    Status1 |= LB_ENC_STAT;
+                    Status1 |= B_ENC_STAT;
                     CNPDA &= !LB_ENC_MASK;
 
                 }
@@ -322,12 +319,12 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
                 CNPDA |= LF_ENC_MASK; //pull-down enable
                 PT_YIELD_TIME_msec(1); //leave time for value to settle
                 if (!(PORTA & LF_ENC_MASK)) {//if pin pulled low
-                    Status1 &= !LF_ENC_STAT;
-                    if ((Status1 & LB_ENC_STAT) && ((config1 & SIX_WHEEL_EN) && (Status1 & LM_ENC_STAT))) {//if 
+                    Status1 &= !F_ENC_STAT;
+                    if ((Status1 & B_ENC_STAT) && ((config1 & SIX_WHEEL_EN) && (Status1 & M_ENC_STAT))) {//if 
                         LF_effort = (LM_effort + LB_effort) >> 1; //set speed to average of remaining motors
-                    } else if ((config1 & SIX_WHEEL_EN) && (Status1 & LM_ENC_STAT)) {
+                    } else if ((config1 & SIX_WHEEL_EN) && (Status1 & M_ENC_STAT)) {
                         LF_effort = LM_effort;
-                    } else if ((Status1 & LB_ENC_STAT)) {
+                    } else if ((Status1 & B_ENC_STAT)) {
                         LF_effort = LB_effort;
                     } else {
                         LF_effort = 2000;
@@ -347,12 +344,12 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
                 CNPDB |= LM_ENC_MASK; //pull-down enable
                 PT_YIELD_TIME_msec(1); //leave time for value to settle
                 if (!(PORTB & LM_ENC_MASK)) {//if pin pulled low
-                    Status1 &= !LM_ENC_STAT;
-                    if ((Status1 & LF_ENC_STAT) && ((Status1 & LB_ENC_STAT))) {//if 
+                    Status1 &= !M_ENC_STAT;
+                    if ((Status1 & F_ENC_STAT) && ((Status1 & B_ENC_STAT))) {//if 
                         LM_effort = (LM_effort + LB_effort) >> 1; //set speed to average of remaining motors
-                    } else if ((Status1 & LB_ENC_STAT)) {
+                    } else if ((Status1 & B_ENC_STAT)) {
                         LM_effort = LB_effort;
-                    } else if ((Status1 & LF_ENC_STAT)) {
+                    } else if ((Status1 & F_ENC_STAT)) {
                         LM_effort = LF_effort;
 
                     } else {
@@ -361,8 +358,8 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
                 }
             }
 
-            CNPUB &= !LM_ENC_STAT; //
-            CNPDB &= !LM_ENC_STAT; //            
+            CNPUB &= !M_ENC_STAT; //
+            CNPDB &= !M_ENC_STAT; //            
         }
 
         if ((LB_Speed == 0) && ((LB_effort > (2000 + ENC_TEST_THRESHOLD)) || (LB_effort < (2000 - ENC_TEST_THRESHOLD)))) {
@@ -374,12 +371,12 @@ static PT_THREAD(protothread_ENC(struct pt *pt)){
                 CNPDA |= LB_ENC_MASK; //pull-down enable
                 PT_YIELD_TIME_msec(1); //leave time for value to settle
                 if (!(PORTA & LB_ENC_MASK)) {//if pin pulled low
-                    Status1 &= !LB_ENC_STAT;
-                    if ((Status1 & LF_ENC_STAT) && ((Status1 & LM_ENC_STAT) && (config1 & SIX_WHEEL_EN))) {//if 
+                    Status1 &= !B_ENC_STAT;
+                    if ((Status1 & F_ENC_STAT) && ((Status1 & M_ENC_STAT) && (config1 & SIX_WHEEL_EN))) {//if 
                         LB_effort = (LM_effort + LF_effort) >> 1; //set speed to average of remaining motors
-                    } else if ((Status1 & LM_ENC_STAT)&&(config1 & SIX_WHEEL_EN)) {
+                    } else if ((Status1 & M_ENC_STAT)&&(config1 & SIX_WHEEL_EN)) {
                         LB_effort = LM_effort;
-                    } else if ((Status1 & LF_ENC_STAT)) {
+                    } else if ((Status1 & F_ENC_STAT)) {
                         LB_effort = LF_effort;
 
                     } else {
@@ -425,7 +422,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
 
-        if (Status1 & LF_ENC_STAT) {
+        if (Status1 & F_ENC_STAT) {
             
             if(LF_effort > 1300 && LF_effort < 2300){
                 if(last_LF_effort != LF_effort){//check for divide by zero condition
@@ -486,7 +483,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
         } 
 
 
-        if (Status1 & LM_ENC_STAT && config1 & SIX_WHEEL_EN) {
+        if (Status1 & M_ENC_STAT && config1 & SIX_WHEEL_EN) {
             if(LM_effort > 1300 && LM_effort < 2300){
                 if(last_LM_effort != LM_effort ){//check for divide by zero condition
                     LM_dir = (LM_Speed- LM_lastSpeed)/(LM_effort - last_LM_effort) ;// ds/de gives direction information    
@@ -545,7 +542,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
             
         } 
 
-        if (Status1 & LB_ENC_STAT) {
+        if (Status1 & B_ENC_STAT) {
             
             if(LB_effort > 1300 && LB_effort < 2300){
                 if(last_LB_effort != LB_effort){//check for divide by zero condition
@@ -714,49 +711,15 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         else if(I2Cstate == 1){
             switch(I2C_request){
                 case ADDR_ALL_PWM:
-                    if ((I2CDataIn & 0x80)) {
-                        if(config1 & PID_EN){
-                            LF_PWM = ((~I2CDataIn)+1)<<1; //bitwise complement
-                            if(LF_PWM > 150){
-                                LF_PWM = 150;
-                            }
-                            LM_PWM = LF_PWM;
-                            LB_PWM = LF_PWM;
-                        }
-                        else{
-                            LF_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
-                            if(LF_effort > 3999){
-                                LF_effort = 3999;
-                                LM_effort = 3999;
-                                LB_effort = 3999;                                
-                            }
-                            else{
-                                LM_effort = LF_effort;
-                                LB_effort = LF_effort;
-                            }
-                                    
-                        }                            
-                    } else {
-                        if(config1 & PID_EN){
-                            LF_PWM = -1 * (I2CDataIn);
-                            if(LF_PWM < -150){
-                                LF_PWM = -150;
-                            }
-                            LM_PWM = LF_PWM;
-                            LB_PWM = LF_PWM;
-                        }
-                        else{
-                            LF_effort = 2000 - (((int)I2CDataIn)<<4);
-                            if(LF_effort < 1){
-                                LF_effort = 1;
-                                LM_effort = 1;
-                                LB_effort = 1;                                
-                            }
-                            else{
-                                LM_effort = LF_effort;
-                                LB_effort = LF_effort;
-                            }           
-                        } 
+                    if (config1 & PID_EN){
+                        LF_PWM = getPWM(I2CDataIn);
+                        LM_PWM = LF_PWM;
+                        LB_PWM = LF_PWM;
+                    }
+                    else{
+                        LF_effort = getEffort(I2CDataIn);
+                        LM_effort = LF_effort;
+                        LB_effort = LF_effort;
                     }
                     break;
                 case ADDR_ALL_P:
@@ -774,122 +737,56 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     LM_D = I2CDataIn;
                     LB_D = I2CDataIn;
                     break;                     
-                case ADDR_LF_PWM:
-                    if(config1 & PID_EN){
-                        if ((I2CDataIn >> 7)) {
-                            LF_PWM = ((~I2CDataIn)+1)<<1;
-                            if(LF_PWM>150){
-                                LF_PWM = 150;
-                            }
-                        } else {
-                            LF_PWM = -1 * (I2CDataIn);
-                            if(LF_PWM<-150){
-                                LF_PWM = -150;
-                            }
-                        }
+                case ADDR_F_PWM:
+                    if (config1 & PID_EN){
+                        LF_PWM = getPWM(I2CDataIn);
                     }
                     else{
-                        if ((I2CDataIn >> 7)) {
-                            LF_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
-                            if(LF_effort > 3999){
-                                LF_effort = 3999;
-                            } 
-                        }
-                        else {
-                            LF_effort = 2000 - ((int)(I2CDataIn));
-                            if(LF_effort < 1){
-                                LF_effort = 1;
-                            }
-                        }
-                    
+                        LF_effort = getEffort(I2CDataIn);
                     }
                     break;
-                case ADDR_LF_P:
+                case ADDR_F_P:
                     LF_P = I2CDataIn;
                     break;
-                case ADDR_LF_I:
+                case ADDR_F_I:
                     LF_I = I2CDataIn;
                     break;
-                case ADDR_LF_D:
+                case ADDR_F_D:
                     LF_D = I2CDataIn; 
                     break;
                     
-                case ADDR_LM_PWM:
-                    if(config1 & PID_EN){
-                        if ((I2CDataIn >> 7)) {
-                            LM_PWM = ((~I2CDataIn)+1)<<1;
-                            if(LM_PWM > 150){
-                                LM_PWM = 150;
-                            }
-                        } else {
-                            LM_PWM = -1 * (I2CDataIn);
-                            if(LM_PWM < -150){
-                                LM_PWM = -150;
-                            }
-                        }
+                case ADDR_M_PWM:
+                    if (config1 & PID_EN){
+                        LM_PWM = getPWM(I2CDataIn);
                     }
                     else{
-                        if ((I2CDataIn >> 7)) {
-                            LM_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
-                            if(LM_effort > 3999){
-                                LM_effort = 3999;
-                            } 
-                        }
-                        else {
-                            LM_effort = 2000 - ((int)(I2CDataIn));
-                            if(LM_effort < 1){
-                                LM_effort = 1;
-                            }
-                        }
-                    
+                        LM_effort = getEffort(I2CDataIn);
                     }
                     break;
-                case ADDR_LM_P:
+                case ADDR_M_P:
                     LM_P = I2CDataIn;
                     break;
-                case ADDR_LM_I:
+                case ADDR_M_I:
                     LM_I = I2CDataIn;
                     break;
-                case ADDR_LM_D:
+                case ADDR_M_D:
                     LM_D = I2CDataIn; 
                     break;
-                case ADDR_LB_PWM:
-                    if(config1 & PID_EN){
-                        if ((I2CDataIn >> 7)) {
-                            LB_PWM = ((~I2CDataIn)+1)<<1;
-                            if(LB_PWM > 150){
-                                LB_PWM = 150;
-                            }
-                        } else {
-                            LB_PWM = -1 * (I2CDataIn);
-                            if(LB_PWM < -150){
-                                LB_PWM = -150;
-                            }
-                        }
+                case ADDR_B_PWM:
+                    if (config1 & PID_EN){
+                        LB_PWM = getPWM(I2CDataIn);
                     }
                     else{
-                        if ((I2CDataIn >> 7)) {
-                            LB_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
-                            if(LB_effort > 3999){
-                                LB_effort = 3999;
-                            } 
-                        }
-                        else {
-                            LB_effort = 2000 - ((int)(I2CDataIn));
-                            if(LB_effort < 1){
-                                LB_effort = 1;
-                            }
-                        }
-                    
+                        LB_effort = getEffort(I2CDataIn);
                     }
                     break;
-                case ADDR_LB_P:
+                case ADDR_B_P:
                     LB_P = I2CDataIn;
                     break;
-                case ADDR_LB_I:
+                case ADDR_B_I:
                     LB_I = I2CDataIn;
                     break;
-                case ADDR_LB_D:
+                case ADDR_B_D:
                     LB_D = I2CDataIn; 
                     break;
                 case ADDR_Config1:
@@ -947,6 +844,7 @@ void InitI2C(void) {
 
 // === Main  ======================================================
 
+
 void main(void) {
 
 
@@ -976,18 +874,14 @@ void main(void) {
     RPB2R = 0x05;  // OC 4
     RPB3R = 0x05;  // OC 1
     RPA2R = 0x06; // OC 5
-//    
-//
-//
-//
+
     OpenTimer2(T2_ON | T2_SOURCE_INT | T2_PS_1_256, 4000);
     ConfigIntTimer2(T2_INT_ON | T2_INT_PRIOR_2);
     
     OpenTimer3(T3_ON|T3_SOURCE_INT| T3_PS_1_8, 4000);
     ConfigIntTimer3(T3_INT_OFF | T3_INT_PRIOR_2);
-//
-//
-//    // set up OC for PWM
+
+    // set up OC for PWM
     ConfigIntOC1(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
     OpenOC1(OC_ON | OC_TIMER3_SRC | OC_PWM_FAULT_PIN_DISABLE, 2000, 2000);//LM pin 6
     ConfigIntOC4(OC_INT_PRIOR_5 | EXT_INT_SUB_PRI_2);
@@ -1001,16 +895,17 @@ void main(void) {
     INT1R = 0; //pin 10, LF_ENC
     INT4R = 0x02; //pin 11, LM_ENC
     INT2R = 0x02; //pin 12, LB_ENC
-//    
+    
     ConfigINT1(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_1);
     ConfigINT2(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_2);
     ConfigINT4(EXT_INT_ENABLE | RISING_EDGE_INT |EXT_INT_PRI_4);
-//
-//    
-//    // init the threads
-//
+
+    
+    // init the threads
+
     PT_INIT(&pt_pid);
     PT_INIT(&pt_ENC);
+    PT_INIT(&pt_anim);
     LF_PWM = 0;
     LM_PWM = 0;
     LB_PWM = 0;
@@ -1023,9 +918,20 @@ void main(void) {
     SetDCOC5PWM(LB_effort);
     tft_init_hw();
     tft_begin();
-    tft_setRotation(0);
     tft_fillScreen(BLACK); //240x320 vertical display
-
+    tft_setRotation(1);
+    
+//    SPISTAT = 0;
+//    if (!FSInit()) {
+//        tft_fillRect(0, 0, 20, 20, RED);//print this if init fails
+//        while (1);
+//    }
+//    spicon_fs = SPI1CON;
+//    spicon2_fs = SPI1CON2;// reset configuration bits so that TFT writes can occur
+//    sprintf(buffer, "%s", CMR);//"CMR_logo.bmp");
+//    readBMP(buffer, 0, 0);
+    
+    
     INTEnableSystemMultiVectoredInt();
     //round robin thread schedule
     while (1) {
@@ -1038,6 +944,7 @@ void main(void) {
             SetDCOC1PWM(LM_effort);
             SetDCOC5PWM(LB_effort);
         }
+        PT_SCHEDULE(protothread_Anim(&pt_anim));
         I2C1CONbits.SCLREL = 1; // release the clock
 
     }
