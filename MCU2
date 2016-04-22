@@ -17,27 +17,23 @@
 // graphics libraries
 #include "tft_gfx.h"
 #include "tft_master.h"
+#include "PWM_logic.h"
+#include "I2C_Reg_defs.h"
 
+
+#define DRIVE
 char buffer[60]; // string buffer
-
-//static int speed;
-//static int lastSpeed;
-//static int drive;
-//static int error;
 static int IntThresh = 0;
-//static int P;
-//static int I;
-//static int D;
 
 #define I2CBAUD 100000 //clock operating at 10kHz
 #define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
-#define I2CAddress 0x1D;
+//#define I2CAddress 0x1D;
 
 
 
 static char I2CDataIn;
 static unsigned char byteReceved;
-static unsigned char config1 = 0x8E;
+static unsigned char config1 = 0x0E;
 static unsigned char Status1 = 0xFF;
 static int RF_PWM;
 static unsigned char RF_P = 8;
@@ -258,7 +254,7 @@ static PT_THREAD(protothread_ENC(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
         if (!(Status1 & 0x80)) {//if encoder already unplugged
-            if ((Status1 & 0x20) && ((config1 & 0x02) && (Status1 & 0x40))) {//if 
+            if ((Status1 & 0x20) && ((config1 & 0x02) && (Status1 & 0x40))) {// 
                 RF_effort = (RM_effort + RB_effort) >> 1; //set speed to average of remaining motors
             } else if ((config1 & 0x02) && (Status1 & 0x40)) {
                 RF_effort = RM_effort;
@@ -757,49 +753,15 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         } else if (I2Cstate == 1) {
             switch (I2C_request) {
                 case ADDR_ALL_PWM:
-                    if ((I2CDataIn & 0x80)) {
-                        if(config1 & PID_EN){
-                            RF_PWM = ((~I2CDataIn)+1)<<1; //bitwise complement
-                            if(RF_PWM > 150){
-                                RF_PWM = 150;
-                            }
-                            RM_PWM = RF_PWM;
-                            RB_PWM = RF_PWM;
-                        }
-                        else{
-                            RF_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
-                            if(RF_effort > 3999){
-                                RF_effort = 3999;
-                                RM_effort = 3999;
-                                RB_effort = 3999;                                
-                            }
-                            else{
-                                RM_effort = RF_effort;
-                                RB_effort = RF_effort;
-                            }
-                                    
-                        }                            
-                    } else {
-                        if(config1 & PID_EN){
-                            RF_PWM = -1 * (I2CDataIn);
-                            if(RF_PWM<-150){
-                                RF_PWM = -150;
-                            }
-                            RM_PWM = RF_PWM;
-                            RB_PWM = RF_PWM;
-                        }
-                        else{
-                            RF_effort = 2000 - (((int)I2CDataIn)<<4);
-                            if(RF_effort < 1){
-                                RF_effort = 1;
-                                RM_effort = 1;
-                                RB_effort = 1;                                
-                            }
-                            else{
-                                RM_effort = RF_effort;
-                                RB_effort = RF_effort;
-                            }           
-                        } 
+                    if (config1 & PID_EN){
+                        RF_PWM = getPWM(I2CDataIn);
+                        RM_PWM = RF_PWM;
+                        RB_PWM = RF_PWM;
+                    }
+                    else{
+                        RF_effort = getEffort(I2CDataIn);
+                        RM_effort = RF_effort;
+                        RB_effort = RF_effort;
                     }
                     break;
                 case ADDR_ALL_P:
@@ -818,35 +780,12 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     RB_D = I2CDataIn;
                     break;
                 case ADDR_RF_PWM:
-                    if(config1 & PID_EN){
-                        if ((I2CDataIn >> 7)) {
-                            RF_PWM = ((~I2CDataIn)+1)<<1;
-                            if(RF_PWM > 150){
-                                RF_PWM = 150;
-                            }
-                        } else {
-                            RF_PWM = -1 * (I2CDataIn);
-                            if(RF_PWM < -150){
-                                RF_PWM = -150;
-                            }
-                        }
+                    if (config1 & PID_EN){
+                        RF_PWM = getPWM(I2CDataIn);
                     }
                     else{
-                        if ((I2CDataIn >> 7)) {
-                            RF_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
-                            if(RF_effort > 3999){
-                                RF_effort = 3999;
-                            } 
-                        }
-                        else {
-                            RF_effort = 2000 - ((int)(I2CDataIn));
-                            if(RF_effort < 1){
-                                RF_effort = 1;
-                            }
-                        }
-                    
+                        RF_effort = getEffort(I2CDataIn);
                     }
-                    SetDCOC3PWM(RF_effort);
                     break;
                 case ADDR_RF_P:
                     RF_P = I2CDataIn;
@@ -859,35 +798,12 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     break;
 
                 case ADDR_RM_PWM:
-                    if(config1 & PID_EN){
-                        if ((I2CDataIn >> 7)) {
-                            RM_PWM = ((~I2CDataIn)+1)<<1;
-                            if(RM_PWM > 150){
-                                RM_PWM = 150;
-                            }
-                        } else {
-                            RM_PWM = -1 * (I2CDataIn);
-                            if(RM_PWM < -150){
-                                RM_PWM = -150;
-                            }
-                        }
+                    if (config1 & PID_EN){
+                        RM_PWM = getPWM(I2CDataIn);
                     }
                     else{
-                        if ((I2CDataIn >> 7)) {
-                            RM_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
-                            if(RM_effort > 3999){
-                                RM_effort = 3999;
-                            } 
-                        }
-                        else {
-                            RM_effort = 2000 - ((int)(I2CDataIn));
-                            if(RM_effort < 1){
-                                RM_effort = 1;
-                            }
-                        }
-                    
+                        RM_effort = getEffort(I2CDataIn);
                     }
-                    SetDCOC2PWM(RM_effort);
                     break;
                 case ADDR_RM_P:
                     RM_P = I2CDataIn;
@@ -899,35 +815,12 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     RM_D = I2CDataIn;
                     break;
                 case ADDR_RB_PWM:
-                    if(config1 & PID_EN){
-                        if ((I2CDataIn >> 7)) {
-                            RB_PWM = ((~I2CDataIn)+1)<<1;
-                            if(RB_PWM > 150){
-                                RB_PWM = 150;
-                            }
-                        } else {
-                            RB_PWM = -1 * (I2CDataIn);
-                            if(RM_PWM < -150){
-                                RM_PWM = -150;
-                            }
-                        }
+                    if (config1 & PID_EN){
+                        RB_PWM = getPWM(I2CDataIn);
                     }
                     else{
-                        if ((I2CDataIn >> 7)) {
-                            RB_effort = 2000 + (((int)((~I2CDataIn)+1))<<4);
-                            if(RB_effort > 3999){
-                                RB_effort = 3999;
-                            } 
-                        }
-                        else {
-                            RB_effort = 2000 - ((int)(I2CDataIn));
-                            if(RB_effort < 1){
-                                RB_effort = 1;
-                            }
-                        }
-                    
+                        RB_effort = getEffort(I2CDataIn);
                     }
-                    SetDCOC1PWM(RB_effort);
                     break;
                 case ADDR_RB_P:
                     RB_P = I2CDataIn;
