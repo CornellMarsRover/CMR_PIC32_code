@@ -17,14 +17,16 @@
 // graphics libraries
 #include "tft_gfx.h"
 #include "tft_master.h"
+#include "I2C_Reg_defs.h"
+
 
 char buffer[60]; // string buffer
 //static int speedTarget; // target fan speed
 
 
-#define I2CBAUD 10000 //clock operating at 10kHz
-#define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
-#define I2CAddress 0x1F;
+//#define I2CBAUD 10000 //clock operating at 10kHz
+//#define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
+//#define I2CAddress 0x1F;
 
 
 
@@ -50,122 +52,90 @@ static unsigned int Bat_Cutoff;
 //---I2C Register Addresses---
 
 
-//Config
-#define ADDR_CLR_I2C_STATE 0xFF
-#define ADDR_Config1  0x00 
-/* BIT7(MSB) = CUR_Sense_EN
- * 
- * CUR_Sense_EN - If enabled, PWM duty cycles will be set to 0% when current
- * sense threshold is reached. Status1 reg holds information on which thresholds
- * have been tripped. To resume normal motor operation, coresponding Status2 
- * bits must be cleared
- * 
- * BIT6 = LowPowerShutoff_EN
- * 
- * LowPowerShutoff_EN - If set MCU will halt all motors if low battery signal received
- * 
- * BIT5 = MOTOR_HALT
- * 
- * MOTOR_HALT - If set, MCU will halt all motors 
- * 
- * BIT4 = RAMP_DOWN_EN
- * 
- * RAMP_DOWN_EN - MCU will set a maximum speed delta; any speed changes
- * that exceed this delta will be done gradually rather than
- * instantaneously
- *
- * BIT3 = MCU_TIMEOUT
- * 
- * MCU_TIMEOUT - MCU will set all motor efforts to 0 if no command has been received 
- * for 2 seconds
- * 
- *
- * Default state of config1 = 0x88
- */
-#define CUR_SENSE_EN 0x80
-#define MOTOR_HALT 0x20
-
-
-//Read-only
-#define ADDR_Status1  0x01
-/*
- * BIT7(MSB) = ~BAT_CUTOFF
- * 
- * BAT_CUTOFF - Bit indicates the rover's battery is running low, 1 if
- * nominal, 0 if low
-
-Default state of register = 0xFF
- */
-
-#define ADDR_Status2  0x02
-/*
- * BIT7(MSB) = M7_CUR
- * BIT6 = M6_CUR
- * BIT5 = M5_CUR
- * BIT4 = M4_CUR
- * BIT3 = M3_CUR
- * 
- * 
- * XX_CUR - Current sense threshold has been reached by the specified motor
- * motor will halt until bit is reset. 1 if threshold is reached
-
-Default state of register = 0x00
- */
-#define M7_CUR 0x80
-#define M6_CUR 0x40
-#define M5_CUR 0x20
-#define M4_CUR 0x10
-#define M3_CUR 0x08
-
-//Motor addresses
-#define ADDR_M3_PWM 0x10
-#define ADDR_M4_PWM 0x11
-#define ADDR_M5_PWM 0x12
-#define ADDR_M6_PWM 0x13
-#define ADDR_M7_PWM 0x14
-
-
-
-//Motor Bank Addresses
-#define ADDR_ALL_PWM 0x20
+////Config
+//#define ADDR_CLR_I2C_STATE 0xFF
+//#define ADDR_Config1  0x00 
+///* BIT7(MSB) = CUR_Sense_EN
+// * 
+// * CUR_Sense_EN - If enabled, PWM duty cycles will be set to 0% when current
+// * sense threshold is reached. Status1 reg holds information on which thresholds
+// * have been tripped. To resume normal motor operation, coresponding Status2 
+// * bits must be cleared
+// * 
+// * BIT6 = LowPowerShutoff_EN
+// * 
+// * LowPowerShutoff_EN - If set MCU will halt all motors if low battery signal received
+// * 
+// * BIT5 = MOTOR_HALT
+// * 
+// * MOTOR_HALT - If set, MCU will halt all motors 
+// * 
+// * BIT4 = RAMP_DOWN_EN
+// * 
+// * RAMP_DOWN_EN - MCU will set a maximum speed delta; any speed changes
+// * that exceed this delta will be done gradually rather than
+// * instantaneously
+// *
+// * BIT3 = MCU_TIMEOUT
+// * 
+// * MCU_TIMEOUT - MCU will set all motor efforts to 0 if no command has been received 
+// * for 2 seconds
+// * 
+// *
+// * Default state of config1 = 0x88
+// */
+//#define CUR_SENSE_EN 0x80
+//#define MOTOR_HALT 0x20
+//
+//
+////Read-only
+//#define ADDR_Status1  0x01
+///*
+// * BIT7(MSB) = ~BAT_CUTOFF
+// * 
+// * BAT_CUTOFF - Bit indicates the rover's battery is running low, 1 if
+// * nominal, 0 if low
+//
+//Default state of register = 0xFF
+// */
+//
+//#define ADDR_Status2  0x02
+///*
+// * BIT7(MSB) = M7_CUR
+// * BIT6 = M6_CUR
+// * BIT5 = M5_CUR
+// * BIT4 = M4_CUR
+// * BIT3 = M3_CUR
+// * 
+// * 
+// * XX_CUR - Current sense threshold has been reached by the specified motor
+// * motor will halt until bit is reset. 1 if threshold is reached
+//
+//Default state of register = 0x00
+// */
+//#define M7_CUR 0x80
+//#define M6_CUR 0x40
+//#define M5_CUR 0x20
+//#define M4_CUR 0x10
+//#define M3_CUR 0x08
+//
+////Motor addresses
+//#define ADDR_M3_PWM 0x10
+//#define ADDR_M4_PWM 0x11
+//#define ADDR_M5_PWM 0x12
+//#define ADDR_M6_PWM 0x13
+//#define ADDR_M7_PWM 0x14
+//
+//
+//
+////Motor Bank Addresses
+//#define ADDR_ALL_PWM 0x20
 
 
 //// command array
 static char cmd[30];
 static int value;
 static int count;
-
-// === the fixed point macros ========================================
-typedef signed int fix16;
-#define multfix16(a,b) ((fix16)(((( signed long long)(a))*(( signed long long)(b)))>>16)) //multiply two fixed 16:16
-#define float2fix16(a) ((fix16)((a)*65536.0)) // 2^16
-#define fix2float16(a) ((float)(a)/65536.0)
-#define fix2int16(a)    ((int)((a)>>16))
-#define int2fix16(a)    ((fix16)((a)<<16))
-#define divfix16(a,b) ((fix16)((((signed long long)(a)<<16)/(b))))
-#define sqrtfix16(a) (float2fix16(sqrt(fix2float16(a))))
-#define absfix16(a) abs(a)
-
-// UART parameters
-#define BAUDRATE 9600 // must match PC end
-#define PB_DIVISOR (1 << OSCCONbits.PBDIV) // read the peripheral bus divider, FPBDIV
-#define PB_FREQ SYS_FREQ/PB_DIVISOR // periperhal bus frequency
-
-// useful ASCII/VT100 macros for PuTTY
-#define clrscr() printf( "\x1b[2J")
-#define home()   printf( "\x1b[H")
-#define pcr()    printf( '\r')
-#define crlf     putchar(0x0a); putchar(0x0d);
-#define max_chars 50 // for input buffer
-
-#define FOSC 60E6
-#define PB_DIV 8
-#define PRESCALE 256
-#define T1_TICK (FOSC/PB_DIV/PRESCALE*64)
-
-#define CONFIG (CN_ON | CN_IDLE_CON)
-#define PINS (CN15_ENABLE)
-#define PULLUPS (CN_PULLUP_DISABLE_ALL)
 
 static struct pt pt_CSense;
 
