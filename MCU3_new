@@ -41,14 +41,18 @@ static unsigned int Servo2_PWM;
 static unsigned int M1_Pot;
 static unsigned int M2_Pot;
 static unsigned int M3_Pot;
+// direction array have 2 bits, one for current direciton bit, one for previous direciton bit
+// use direction index to indicate which one is current direcition bit
+static unsigned int M1_dir_arr[];
+static unsigned int M1_dir_ind;
+static unsigned int M2_dir_arr[];
+static unsigned int M2_dir_ind;
+// indicate triggered direction
+static unsigned int M1_triggered_dir;
+static unsigned int M2_triggered_dir;
 
 static unsigned int CUR_Sense;
 //BIT7(MSB) - Motor2, BIT6(MSB) - Motor1
-
-
-
-
-
 
 static unsigned char Bat_Cutoff; //pin 14
 
@@ -200,46 +204,26 @@ static PT_THREAD(protothread_CSense(struct pt *pt)) {
     while (1) {
         if (config1 & 0x80) {
             if (mPORTBReadBits(BIT_7)) {
-                TEMP_M1_PWM = ReadDCOC1PWM();
-                // both forward
-                if (TEMP_M1_PWM > 2000 && M1_PWM > 2000){
+                // direction bit same
+                if (M1_dir_arr[0] == M1_dir_arr[1]){
                     M1_PWM = 0;
                     SetDCOC1PWM(M1_PWM);
                     Status2 |= 0x40;
-                }
-                // both backward
-                else if (TEMP_M1_PWM < 2000 && M1_PWM < 2000){
-                    M1_PWM = 0;
-                    SetDCOC1PWM(M1_PWM);
-                    Status2 |= 0x40;
-                }
-                // move in different directions
-                else{
-                    SetDCOC1PWM(TEMP_M1_PWM);
-                    Status2 |= 0x40;
+                    M1_triggered_dir = M1_dir_arr[M1_dir_ind];
                 }
                 
             }
             if (mPORTBReadBits(BIT_10)) {
-                TEMP_M2_PWM = ReadDCOC2PWM();
-                // both forward
-                if (TEMP_M2_PWM > 2000 && M2_PWM > 2000){
+                // direction bit same
+                if (M2_dir_arr[0] == M2_dir_arr[1]){
                     M2_PWM = 0;
                     SetDCOC3PWM(M2_PWM);
                     Status2 |= 0x80;
+                    M2_triggered_dir = M2_dir_arr[M2_dir_ind];
                 }
-                // both backward
-                else if (TEMP_M2_PWM < 2000 && M2_PWM < 2000){
-                    M2_PWM = 0;
-                    SetDCOC3PWM(M2_PWM);
-                    Status2 |= 0x80;
-                }
-                // move in different directions
-                else{
-                    SetDCOC3PWM(TEMP_M2_PWM);
-                    Status2 |= 0x80;
-                }
+
             }
+            
         }
         PT_YIELD_TIME_msec(10);
 
@@ -310,41 +294,83 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                             mPORTBClearBits(BIT_7|BIT_10);
                             M1_PWM = (((int)((~I2CDataIn)+1))<<4);
                             M2_PWM = M1_PWM;
+                            // set direction bits to direction array
+                            M1_dir_arr[M1_dir_ind] = 1;
+                            M2_dir_arr[M2_dir_ind] = 1;
+                            M1_dir_ind = (M1_dir_ind+1)%2;
+                            M2_dir_ind = (M2_dir_ind+1)%2;
                     } else {
                             mPORTBSetBits(BIT_7|BIT_10);
                             M1_PWM = ((int)I2CDataIn) << 4;
                             M2_PWM = M1_PWM;
+                            // set direction bits to direction array
+                            M1_dir_arr[M1_dir_ind] = 0;
+                            M2_dir_arr[M2_dir_ind] = 0;
+                            M1_dir_ind = (M1_dir_ind+1)%2;
+                            M2_dir_ind = (M2_dir_ind+1)%2;
                     }
-                    SetDCOC1PWM(M1_PWM);
-                    SetDCOC3PWM(M2_PWM);
+                    // if current sense is triggered
+                    if ((Status2 & M1_CUR) && (config1 & CUR_SENSE_EN)){
+                        // if direction is different
+                        if (M1_dir_arr[0] != M1_dir_arr[1]){
+                            SetDCOC1PWM(M1_PWM);
+                        }
+                    }
+                    
+                    // if current sense is triggered
+                    if ((Status2 & M2_CUR) && (config1 & CUR_SENSE_EN)){
+                        // if direction is different
+                        if (M2_dir_arr[0] != M2_dir_arr[1]){
+                            SetDCOC3PWM(M2_PWM);
+                        }
+                    }
+                    
                     break;
                 case ADDR_M1_PWM:
-                    if (((Status2 & M1_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
+                    if (config1 & MOTOR_HALT) {
+                        M1_PWM = 0;
+                    }
+                    else if ((Status2 & M1_CUR) && (config1 & CUR_SENSE_EN) && (M1_dir_arr[0] == M1_dir_arr[1])){
                         M1_PWM = 0;
                     }
                     else{
                         if (I2CDataIn & 0x80) {
                             mPORTBClearBits(BIT_7);
                             M1_PWM = (((int)((~I2CDataIn)+1))<<4);
+                            // set direction bits to direction array
+                            M1_dir_arr[M1_dir_ind] = 1;
+                            M1_dir_ind = (M1_dir_ind+1)%2;
                         } else {
                             mPORTBSetBits(BIT_7);
                             M1_PWM = ((int)I2CDataIn) << 4;
+                            // set direction bits to direction array
+                            M1_dir_arr[M1_dir_ind] = 1;
+                            M1_dir_ind = (M1_dir_ind+1)%2;
                         }
                     }
                     SetDCOC1PWM(M1_PWM);
                     break;
                 case ADDR_M2_PWM:
-                    if (((Status2 & M1_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
+                    if (config1 & MOTOR_HALT) {
                         M2_PWM = 0; 
+                    }
+                    else if ((Status2 & M2_CUR) && (config1 & CUR_SENSE_EN) && (M2_dir_arr[0] == M2_dir_arr[1])){
+                        M2_PWM = 0;
                     }
                     else{
                     if (I2CDataIn & 0x80) {
                         mPORTBClearBits(BIT_10);
                         M2_PWM = (((int)((~I2CDataIn)+1))<<4);
+                        // set direction bits to direction array
+                        M2_dir_arr[M2_dir_ind] = 1;
+                        M2_dir_ind = (M2_dir_ind+1)%2;
 
                     } else {
                         mPORTBSetBits(BIT_10);
                         M2_PWM = ((int)I2CDataIn) << 4;
+                        // set direction bits to direction array
+                        M2_dir_arr[M2_dir_ind] = 1;
+                        M2_dir_ind = (M2_dir_ind+1)%2;
                     }
                     }
                     SetDCOC3PWM(M2_PWM);
@@ -455,7 +481,17 @@ void main(void) {
     ANSELB = 0;
     AD1CON2 = 0;
     mJTAGPortEnable(0);
-
+    // initialize direction index and direction array
+    M1_dir_ind = 0;
+    M1_dir_arr[0] = 0;
+    M1_dir_arr[1] = 0;
+    M2_dir_ind = 0;
+    M2_dir_arr[0] = 0;
+    M2_dir_arr[1] = 0;
+    M1_triggered = 0;
+    M1_triggered_dir = 0;
+    M2_triggered = 0;
+    M2_triggered_dir = 0;
 
     PT_setup();
     RPA0R = 0;
@@ -555,7 +591,9 @@ void main(void) {
     PT_INIT(&pt_CSense);
     while (1) {
         PT_SCHEDULE(protothread_ADC(&pt_ADC));
-//        PT_SCHEDULE(protothread_CSense(&pt_CSense));
+           // PT_SCHEDULE(protothread_CSense(&pt_CSense));
+
+      
         //        PT_SCHEDULE(protothread_anim(&pt_anim));
     }
 } // main
