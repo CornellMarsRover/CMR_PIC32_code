@@ -47,9 +47,6 @@ static unsigned int M1_dir_arr[];
 static unsigned int M1_dir_ind;
 static unsigned int M2_dir_arr[];
 static unsigned int M2_dir_ind;
-// indicate triggered direction
-static unsigned int M1_triggered_dir;
-static unsigned int M2_triggered_dir;
 
 static unsigned int CUR_Sense;
 //BIT7(MSB) - Motor2, BIT6(MSB) - Motor1
@@ -209,7 +206,6 @@ static PT_THREAD(protothread_CSense(struct pt *pt)) {
                     M1_PWM = 0;
                     SetDCOC1PWM(M1_PWM);
                     Status2 |= 0x40;
-                    M1_triggered_dir = M1_dir_arr[M1_dir_ind];
                 }
                 
             }
@@ -219,7 +215,6 @@ static PT_THREAD(protothread_CSense(struct pt *pt)) {
                     M2_PWM = 0;
                     SetDCOC3PWM(M2_PWM);
                     Status2 |= 0x80;
-                    M2_triggered_dir = M2_dir_arr[M2_dir_ind];
                 }
 
             }
