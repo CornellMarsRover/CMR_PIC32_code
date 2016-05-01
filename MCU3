@@ -150,7 +150,8 @@ static char cmd[30];
 static unsigned int IMUData[8];
 static int value;
 static int count;
-#define IMUADD 0x28
+#define IMUADD 0x28 //base
+#define IMUADD2 0x29 //wrist
 
 #define MIN_SERVO_DUTY       3000
 #define MAX_SERVO_DUTY      50000
@@ -169,11 +170,11 @@ static unsigned int rcv;
 float cels;
 static unsigned char addr = 0x5A;
 static unsigned int placeholder;
-void SendIMUData (int reg_addr, int data){
+void SendIMUData (int reg_addr, int data, char address){
 	StartI2C2();	        //Send the Start Bit
 	IdleI2C2();		//Wait to complete
 
-	MasterWriteI2C2(IMUADD << 1);  //Sends the slave address over the I2C line.                                               
+	MasterWriteI2C2(address << 1);  //Sends the slave address over the I2C line.                                               
 	IdleI2C2();             //Wait to complete
 
 	MasterWriteI2C2(reg_addr);  //Sends data byte over I2C line
@@ -187,13 +188,13 @@ void SendIMUData (int reg_addr, int data){
 } 
 
 
-int RcvIMUData(unsigned int reg_addr) {
+int RcvIMUData(unsigned int reg_addr, char IMUAddress) {
 //	//see page 92 of https://www.adafruit.com/datasheets/BST_BNO055_DS000_12.pdf
    
     rcv = 0;
     StartI2C2();                //Send line start condition
     IdleI2C2();                 //Wait to complete
-    MasterWriteI2C2(IMUADD<<1);      //Write slave addr WRITE (OR 0)
+    MasterWriteI2C2(IMUAddress<<1);      //Write slave addr WRITE (OR 0)
     IdleI2C2();
     MasterWriteI2C2(reg_addr);      //BNO055_QUATERNION_DATA_W_LSB_ADDR
     IdleI2C2();             
@@ -201,7 +202,7 @@ int RcvIMUData(unsigned int reg_addr) {
     RestartI2C2();
     IdleI2C2();
 
-    MasterWriteI2C2((IMUADD<<1) | 0x01);      //Write the slave address, READ (OR 1)
+    MasterWriteI2C2((IMUAddress<<1) | 0x01);      //Write the slave address, READ (OR 1)
     IdleI2C2(); 
     
     rcv |= MasterReadI2C2();    //Read in LSB
@@ -220,10 +221,15 @@ static int temp;
 static PT_THREAD(protothread_I2C(struct pt *pt)){
     PT_BEGIN(pt);
     while(1){
-        IMUData[0] = RcvIMUData(BNO055_QUATERNION_DATA_W_LSB_ADDR);
-        IMUData[1] = RcvIMUData(BNO055_QUATERNION_DATA_X_LSB_ADDR);
-        IMUData[2] = RcvIMUData(BNO055_QUATERNION_DATA_Y_LSB_ADDR);
-        IMUData[3] = RcvIMUData(BNO055_QUATERNION_DATA_Z_LSB_ADDR);
+        IMUData[0] = RcvIMUData(BNO055_QUATERNION_DATA_W_LSB_ADDR,IMUADD);
+        IMUData[1] = RcvIMUData(BNO055_QUATERNION_DATA_X_LSB_ADDR,IMUADD);
+        IMUData[2] = RcvIMUData(BNO055_QUATERNION_DATA_Y_LSB_ADDR,IMUADD);
+        IMUData[3] = RcvIMUData(BNO055_QUATERNION_DATA_Z_LSB_ADDR,IMUADD);
+        
+        IMUData[4] = RcvIMUData(BNO055_QUATERNION_DATA_W_LSB_ADDR, IMUADD2);
+        IMUData[5] = RcvIMUData(BNO055_QUATERNION_DATA_X_LSB_ADDR, IMUADD2);
+        IMUData[6] = RcvIMUData(BNO055_QUATERNION_DATA_Y_LSB_ADDR, IMUADD2);
+        IMUData[7] = RcvIMUData(BNO055_QUATERNION_DATA_Z_LSB_ADDR, IMUADD2);
         PT_YIELD_TIME_msec(100);
     }
     PT_END(pt);
@@ -232,41 +238,43 @@ static PT_THREAD(protothread_I2C(struct pt *pt)){
 static unsigned int POT1;
 static unsigned int POT2;
 static unsigned int MAG; //magnetic sensor
-static unsigned int POT1Array[10];
-static unsigned int POT2Array[10];
-static unsigned int MAGArray[10]; //magnetic sensor
-static unsigned int sum1;
-static unsigned int sum2;
-static unsigned int sum3;
+static unsigned int POT1In;
+static unsigned int POT2In;
+static unsigned int MAGIn; //magnetic sensor
+#define ALPHA ((double)ADC_PERIOD)/100.0
+#define ADC_PERIOD 10
 
 static PT_THREAD(protothread_ADC(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-        int i = 0;
-        for(i = 9; i > 0; i --){
-            POT1Array[i] = POT1Array[i-1];
-            POT2Array[i] = POT2Array[i-1];
-            MAGArray[i] = MAGArray[i-1];      
-        }
+//        int i = 0;
+//        for(i = 9; i > 0; i --){
+//            POT1Array[i] = POT1Array[i-1];
+//            POT2Array[i] = POT2Array[i-1];
+//            MAGArray[i] = MAGArray[i-1];      
+//        }
         
-        MAGArray[0] = ReadADC10(0);
-        POT2Array[0] = ReadADC10(1);
-        POT1Array[0] = ReadADC10(2);
+        //IIR Filter
+        //
+              
+        MAG = (1-ALPHA)*MAG + ALPHA*ReadADC10(0);
+        POT2 = (1-ALPHA)*MAG + ALPHA*ReadADC10(1);
+        POT1 = (1-ALPHA)*MAG + ALPHA*ReadADC10(2);
         
-        sum1 = 0;
-        sum2 = 0;
-        sum3 = 0;
-        for(i = 9; i >= 0; i --){
-            sum1 += POT1Array[i]; 
-            sum2 += POT2Array[i]; 
-            sum3 += MAGArray[i];
-        }
-        POT1 = sum1/10;
-        POT2 = sum2/10;
-        MAG = sum3/10;
+//        sum1 = 0;
+//        sum2 = 0;
+//        sum3 = 0;
+//        for(i = 9; i >= 0; i --){
+//            sum1 += POT1Array[i]; 
+//            sum2 += POT2Array[i]; 
+//            sum3 += MAGArray[i];
+//        }
+//        POT1 = sum1/10;
+//        POT2 = sum2/10;
+//        MAG = sum3/10;
         
         
-        PT_YIELD_TIME_msec(10);
+        PT_YIELD_TIME_msec(ADC_PERIOD);
     }
     PT_END(pt);
 }
@@ -317,7 +325,7 @@ static unsigned char I2C_request;
 //
 ///////////////////////////////////////////////////////////////////
 static char writepointer = 0;
-
+static unsigned char WDTCount = 0;
 void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
     unsigned char temp;
     static unsigned int dIndex;
@@ -342,6 +350,9 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         I2C1CONbits.SCLREL = 1; // release the clock
         I2Cstate = 0;
     } else if ((I2C1STATbits.R_W == 0) && (I2C1STATbits.D_A == 1)) {//data received, input to slave
+        WDTCount = 0;//reset watchdog
+        WriteTimer1(0);//feed the watchdog
+        
         // writing data to our module
         I2CDataIn = SlaveReadI2C1();
         I2C1CONbits.SCLREL = 1; // release clock stretch bit
@@ -461,6 +472,18 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                 case QUATERNION_DATA_Z:
                     SlaveWriteI2C1(IMUData[3]>>8);
                     break;
+                case QUATERNION_DATA2_W:
+                    SlaveWriteI2C1(IMUData[4]>>8);
+                    break;
+                case QUATERNION_DATA2_X:
+                    SlaveWriteI2C1(IMUData[5]>>8);
+                    break;
+                case QUATERNION_DATA2_Y:
+                    SlaveWriteI2C1(IMUData[6]>>8);
+                    break;
+                case QUATERNION_DATA2_Z:
+                    SlaveWriteI2C1(IMUData[7]>>8);
+                    break;
                 default:
                     SlaveWriteI2C1(0);
                     I2C_request = 0;
@@ -492,6 +515,18 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                 break;
             case QUATERNION_DATA_Z:
                 SlaveWriteI2C1(IMUData[3] & 255);
+                break;
+            case QUATERNION_DATA2_W:
+                SlaveWriteI2C1(IMUData[4] & 255);
+                break;
+            case QUATERNION_DATA2_X:
+                SlaveWriteI2C1(IMUData[5] & 255);
+                break;
+            case QUATERNION_DATA2_Y:
+                SlaveWriteI2C1(IMUData[6] & 255);
+                break;
+            case QUATERNION_DATA2_Z:
+                SlaveWriteI2C1(IMUData[7] & 255);
                 break;
             default:
                 SlaveWriteI2C1(0);
@@ -566,7 +601,25 @@ void __ISR( _TIMER_4_VECTOR, ipl3) T4Interrupt( void){
 } // T4 Interrupt
 
 
+inline void setWDT(void){
+    OpenTimer1(T1_ON | T1_SOURCE_INT | T1_PS_1_256, 60000);
+    ConfigIntTimer1(T1_INT_ON | T1_INT_PRIOR_1);
+    
+    
+}
 
+void __ISR(_TIMER_1_VECTOR, ipl1) WatchdogInt(void)
+{
+    WDTCount ++;
+    if(WDTCount > 3){//~1sec
+        WDTCount = 3; //prevent overflow
+        SetDCOC1PWM(0);
+        SetDCOC3PWM(0);
+        Servo1_PWM = 200;
+        Servo2_PWM = 0;
+    }
+    mT4ClearIntFlag();  
+}
 
 // === Main  ======================================================
 
@@ -691,10 +744,17 @@ void main(void) {
     PT_INIT(&pt_CSense);
     PT_INIT(&pt_I2C);
     unsigned int OPR_CODE = 0x3D;
-    SendIMUData(OPR_CODE, 0x00);        //sets IMU mode to CONFIG    
-    delay_ms(100);
-    SendIMUData(OPR_CODE, 0x0C);        //sets IMU mode to NDOF
-    delay_ms(100);
+    SendIMUData(OPR_CODE, 0x00, IMUADD);        //sets IMU mode to CONFIG    
+    delay_ms(10);
+    SendIMUData(OPR_CODE, 0x0C, IMUADD);        //sets IMU mode to NDOF
+    delay_ms(10);
+    SendIMUData(OPR_CODE, 0x00, IMUADD2);        //sets IMU mode to CONFIG    
+    delay_ms(10);
+    SendIMUData(OPR_CODE, 0x0C, IMUADD2);        //sets IMU mode to NDOF
+    delay_ms(10);    
+    IMUData[0] = 1;
+    IMUData[4] = 1; 
+    setWDT();
     while (1) {
         PT_SCHEDULE(protothread_ADC(&pt_ADC));
         PT_SCHEDULE(protothread_I2C(&pt_I2C));
