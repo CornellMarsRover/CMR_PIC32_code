@@ -128,6 +128,7 @@ Default state of register = 0xFF
 #define LF_ENC_MASK 0x08
 #define LM_ENC_MASK 0x10
 #define LB_ENC_MASK 0x10
+#define STOP_SPEED 2250
 #endif
 
 #ifdef MCU2
