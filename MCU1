@@ -34,20 +34,20 @@ char buffer[60]; // string buffer
 
 static char I2CDataIn;
 static int byteReceved;
-static int config1 = 0x0E;
+static int config1 = 0x8E;
 static int Status1 = 0xFF;
 static int LF_PWM;
-static int LF_P = 16;
-static int LF_I = 2;
-static int LF_D = 2;
+static int LF_P = 23;
+static int LF_I = 12;
+static int LF_D = 10;
 static int LM_PWM;
-static int LM_P = 16;
-static int LM_I = 2;
-static int LM_D = 2;
+static int LM_P = 23;
+static int LM_I = 12;
+static int LM_D = 10;
 static int LB_PWM;
-static int LB_P = 16;
-static int LB_I = 2;
-static int LB_D = 2;
+static int LB_P = 23;
+static int LB_I = 12;
+static int LB_D = 10;
 static unsigned char halted;
 
 static int LF_Speed;
@@ -184,6 +184,7 @@ static int count_LF;
 static int count_LM;
 static int count_LB;
 static int IntThresh = 0;
+signed short LB_speed_out;
 //// receive function prototype (see below for code)
 //// int GetDataBuffer(char *buffer, int max_size);
 //
@@ -415,9 +416,8 @@ static int last_last_LF_effort;
 static int last_LF_effort;
 static int last_LM_effort;
 static int last_LB_effort;
-#define MIN_STOP_SPEED 1700
-#define MAX_STOP_SPEED 2400
-
+#define MIN_STOP_SPEED 2100
+#define MAX_STOP_SPEED 2500
 
 
 static PT_THREAD(protothread_pid(struct pt *pt)) {
@@ -578,7 +578,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
                 }
                 LB_reverse = 1; //save direction
             }            
-            
+            LB_speed_out = LB_Speed; 
             
             
             LB_error = LB_PWM - LB_Speed; // get error from difference
@@ -808,16 +808,30 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
     } else if ((I2C1STATbits.R_W == 1) && (I2C1STATbits.D_A == 0)) {
         // read of the slave device, read the address
         temp = SlaveReadI2C1();
-        dIndex = 0;
-        SlaveWriteI2C1(0xF6);
+        if (I2Cstate == 1) {
+            I2Cstate = 0;
+            switch (I2C_request) {
+                case ADDR_B_SPEED:
+                    SlaveWriteI2C1(LB_speed_out >> 8);
+                    break;
+                default:
+                    SlaveWriteI2C1(0x7F);
+                    I2C_request = 0;
+                    break;
+            }
+        }
     } else if ((I2C1STATbits.R_W == 1) && (I2C1STATbits.D_A == 1)) {
         // output the data until the MASTER terminates the
         // transfer with a NACK, continuing reads return 0
-        if (dIndex == 0) {
-            SlaveWriteI2C1(0x66);
-            dIndex++;
-        } else
-            SlaveWriteI2C1(0);
+        switch (I2C_request) {
+            case ADDR_B_SPEED:
+                SlaveWriteI2C1(LB_speed_out & 255);
+                break;
+            default:
+                SlaveWriteI2C1(0x7F);
+                I2C_request = 0;
+                break;
+        }
 
     }
 
@@ -871,7 +885,7 @@ void __ISR(_TIMER_1_VECTOR, ipl1) WatchdogInt(void)
             LF_effort = 0;
         }
     }
-    mT4ClearIntFlag();  
+    mT1ClearIntFlag();  
 }
 
 
