@@ -49,6 +49,7 @@
  * drive is used
  * 
  * 
+ * 
  */
 #define PID_EN                          0x80
 #define LowPowerShutoff_EN              0x40
@@ -138,6 +139,8 @@ Default state of register = 0xFF
 #define RB_ENC_MASK 0x01
 #define ADDR_BAT_LVL 0x33
 #define ADDR_HUM_SENSE 0x34
+#define ADDR_LATCH 0x1C
+
 #endif
 
 #ifdef TASK
@@ -168,6 +171,8 @@ Default state of register = 0xFF
  * MCU_TIMEOUT - MCU will set all motor efforts to 0 if no command has been received 
  * for 2 seconds
  * 
+ * BIT2 = IR_SENSOR
+ * 
  *
  * Default state of config1 = 0x88
  */
@@ -176,6 +181,7 @@ Default state of register = 0xFF
 #define MOTOR_HALT 0x20
 #define RAMP_DOWN_EN 0x10
 #define MCU_TIMEOUT_EN 0x04
+#define IR_SENSOR 0x02
 
 
 //Read-only
@@ -204,6 +210,8 @@ Default state of register = 0xFF
 
 Default state of register = 0x00
  */
+
+
 #define M2_CUR 0x80
 #define M1_CUR 0x40
 
@@ -223,12 +231,18 @@ Default state of register = 0x00
 #define ADDR_POT1 0x40
 #define ADDR_POT2 0x41
 #define ADDR_MAG 0x42
+#define ADDR_TEMP_SENSOR 0x43
 
 //IMU Data Addresses
 #define QUATERNION_DATA_W   0x50
 #define QUATERNION_DATA_X   0x51
 #define QUATERNION_DATA_Y   0x52
 #define QUATERNION_DATA_Z   0x53
+
+#define QUATERNION_DATA2_W   0x54
+#define QUATERNION_DATA2_X   0x55
+#define QUATERNION_DATA2_Y   0x56
+#define QUATERNION_DATA2_Z   0x57
 #endif
 
 #ifdef MCU4
