@@ -33,21 +33,20 @@ static int IntThresh = 0;
 
 static char I2CDataIn;
 static unsigned char byteReceved;
-static unsigned char config1 = 0x0E;
+static unsigned char config1 = 0x8E;
 static unsigned char Status1 = 0xFF;
 static int RF_PWM;
-static int RF_P = 16;
-static int RF_I = 2;
-static int RF_D = 2;
+static int RF_P = 23;
+static int RF_I = 5;
+static int RF_D = 5;
 static int RM_PWM;
-static int RM_P = 16;
-static int RM_I = 2;
-static int RM_D = 2;
+static int RM_P = 23;
+static int RM_I = 5;
+static int RM_D = 5;
 static int RB_PWM;
-static int RB_P = 16
-;
-static int RB_I = 2;
-static int RB_D = 2;
+static int RB_P = 23;
+static int RB_I = 5;
+static int RB_D = 5;
 static unsigned char halted;
 
 static int RF_Speed;
@@ -225,6 +224,16 @@ static int RB_integral;
 static int RB_effort;
 static int last_RB_effort;
 static int RB_lastSpeed;
+
+#define STOP_SPEED 2300
+
+#define MIN_SERVO_DUTY       3000
+#define MAX_SERVO_DUTY      50000
+#define MAX_SERVO_DUTY 2950
+static int Servo_PWM = 200;
+static unsigned char servo_ON; //1 if high, 0 if low
+#define SERVO2_PER_UNIT 16 //15.6; 500 = 0.1 ms
+#define SERVO1_PER_UNIT 6 //
 
 //// receive function prototype (see below for code)
 //// int GetDataBuffer(char *buffer, int max_size);
@@ -443,8 +452,9 @@ static int RB_reverse;
 static int last_last_RB_effort;
 static int last_last_RM_effort;
 static int last_last_RF_effort;
-#define MIN_STOP_SPEED 1700
-#define MAX_STOP_SPEED 2400
+signed short RB_speed_out;
+#define MIN_STOP_SPEED 2100
+#define MAX_STOP_SPEED 2500
 
 static PT_THREAD(protothread_pid(struct pt *pt)) {
     PT_BEGIN(pt);
@@ -604,7 +614,7 @@ static PT_THREAD(protothread_pid(struct pt *pt)) {
                 }
                 RB_reverse = 1; //save direction
             }            
-            
+            RB_speed_out = RB_Speed;
             
             
             RB_error = RB_PWM - RB_Speed; // get error from difference
@@ -840,6 +850,14 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                 case ADDR_Config1:
                     config1 = I2CDataIn;
                     break;
+                case ADDR_LATCH:
+                    if(I2CDataIn==0xFF){
+                        mPORTBSetBits(BIT_10);
+                    }
+                    else{
+                        mPORTBClearBits(BIT_10);
+                    }
+                    break;
                 default:
                     break;
 
@@ -859,6 +877,9 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         else if(I2C_request == ADDR_Status1){
             SlaveWriteI2C1(Status1);            
         }
+        else if(I2C_request == ADDR_B_SPEED){
+            SlaveWriteI2C1(RB_speed_out>>8);
+        }
         else{
             SlaveWriteI2C1(0x00);
             I2C_request = 0;
@@ -869,6 +890,9 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
 //        temp = SlaveReadI2C1();//dummy read
         if(I2C_request == ADDR_HUM_SENSE){
             SlaveWriteI2C1(Hum_sense & 255);            
+        }
+        else if(I2C_request == ADDR_B_SPEED){
+            SlaveWriteI2C1(RB_speed_out & 255);
         }
         else{
             SlaveWriteI2C1(0x00);
@@ -927,8 +951,24 @@ void __ISR(_TIMER_1_VECTOR, ipl1) WatchdogInt(void)
             RF_effort = 0;
         }
     }
-    mT4ClearIntFlag();  
+    mT1ClearIntFlag();  
 }
+
+
+void __ISR( _TIMER_4_VECTOR, ipl3) T4Interrupt( void){
+    if (servo_ON){
+        //int x = MAX_SERVO_DUTY  - (NEUTRAL_SERVO_DUTY + per);
+        WritePeriod4(MAX_SERVO_DUTY); //- (NEUTRAL_SERVO_DUTY + Servo1_PWM * SERVO_PER_UNIT));
+        servo_ON = 0;
+        mPORTBClearBits(BIT_10);
+    }
+    else { 
+        WritePeriod4(MAX_SERVO_DUTY - (Servo_PWM<<3));
+        servo_ON = 1;
+        mPORTBSetBits(BIT_10);
+    }
+    mT4ClearIntFlag(); 
+} // T4 Interrupt
 
 // === Main  ======================================================
 
@@ -992,13 +1032,13 @@ void main(void) {
     RPA1R = 0x05; // OC 2, RM
     RPB14R = 0x05; // OC 3, RF
 
-    mPORTBSetPinsDigitalOut(BIT_14|BIT_3);
+    mPORTBSetPinsDigitalOut(BIT_14|BIT_3|BIT_10);
     mPORTASetPinsDigitalOut(BIT_1);
     mPORTASetPinsDigitalIn(BIT_0|BIT_2);
     mPORTBSetPinsDigitalIn(BIT_0|BIT_1|BIT_2);
     //    CNPUA |= 0xFF;
     //    ODCA |= 0xC0;
-
+    mPORTBClearBits(BIT_10);
     // external interrupt0:
 
     INT1R = 0x02; //pin 4, RB_ENC
@@ -1047,6 +1087,11 @@ void main(void) {
 //    tft_fillScreen(ILI9340_BLACK); //240x320 vertical display
     setWDT();
     INTEnableSystemMultiVectoredInt();
+   
+    //Timer, servo pwm
+//    OpenTimer4( T4_ON | T4_PS_1_16 | T4_SOURCE_INT, MAX_SERVO_DUTY);
+//    ConfigIntTimer4(T4_INT_OFF| T4_INT_PRIOR_3);
+//    mT4IntEnable(1);      // enable timer4 interrupts
     
     
     while (1) {
@@ -1063,6 +1108,6 @@ void main(void) {
         I2C1CONbits.SCLREL = 1; // release the clock
     }
 } // main
-
+//RF_DIR
 
 // === end  ======================================================
