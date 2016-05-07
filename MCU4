@@ -422,7 +422,7 @@ void __ISR(_TIMER_1_VECTOR, ipl1) WatchdogInt(void)
         SetDCOC4PWM(0);
         SetDCOC5PWM(0);
     }
-    mT4ClearIntFlag();  
+    mT1ClearIntFlag();  
 }
 
 // === Main  ======================================================
@@ -486,7 +486,7 @@ void main(void) {
 
     // init the threads
 
-    setWDT();
+//    setWDT();
     INTEnableSystemMultiVectoredInt();
 
 
