@@ -27,8 +27,8 @@
 //#define use_vref_debug
 
 // IF use_uart_serial IS defined, pin 21 and pin 22 are used by the uart
-#define use_uart_serial
-#define BAUDRATE 9600 // must match PC terminal emulator setting
+//#define use_uart_serial
+//#define BAUDRATE 9600 // must match PC terminal emulator setting
 
 /////////////////////////////////
 // set up clock parameters
@@ -37,6 +37,8 @@
 
 // sys_clock/FPBDIV
 #define pb_clock sys_clock // divide by one in this case
+#define DRIVE // drive microcontroller
+#define MCU1
 
 #endif	/* CONFIG_H */
 

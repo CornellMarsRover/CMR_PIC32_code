@@ -58,8 +58,8 @@ inline void Mode8(void){  // configure SPI1 for 8-bit mode
 void tft_init_hw(void) {
   _width = ILI9340_TFTWIDTH;
   _height = ILI9340_TFTHEIGHT;
-  RPA1R = 3;               // SDO pin for SPI - goes to MOSI on TFT
-  //SDI1R = 0; // RA1       // I won't be reading from TFT
+  RPB1R = 3;               // SDO pin for SPI - goes to MOSI on TFT
+  SDI1R = 0; // RA1      
 }
 
 void tft_spiwrite(unsigned char c){ // Transfer to SPI

@@ -24,20 +24,20 @@
 #include "plib.h"
 //#include <Adafruit_GFX.h>
 
-#define _dc         LATAbits.LATA2
-#define TRIS_dc     TRISAbits.TRISA2
-#define _dc_high()  {LATASET = 4;}
-#define _dc_low()   {LATACLR = 4;}
+#define _dc         LATBbits.LATB10
+#define TRIS_dc     TRISBbits.TRISB10
+#define _dc_high()  {LATBSET |= 0x0400;}
+#define _dc_low()   {LATBCLR |= 0x0400;}
 
-#define _cs         LATBbits.LATB1
-#define TRIS_cs     TRISBbits.TRISB1
-#define _cs_high()  {LATBSET = 2;}
-#define _cs_low()   {LATBCLR = 2;}
+#define _cs         LATAbits.LATA0
+#define TRIS_cs     TRISAbits.TRISA0
+#define _cs_high()  {LATASET |= 1;}
+#define _cs_low()   {LATACLR |= 1;}
 
-#define _rst        LATBbits.LATB2
-#define TRIS_rst    TRISBbits.TRISB2
-#define _rst_high() {LATBSET = 4;}
-#define _rst_low()  {LATBCLR = 4;}
+#define _rst        LATBbits.LATB15
+#define TRIS_rst    TRISBbits.TRISB15
+#define _rst_high() {LATBSET |= 0x8000;}
+#define _rst_low()  {LATBCLR |= 0x8000;}
 
 #define ILI9340_TFTWIDTH  240
 #define ILI9340_TFTHEIGHT 320
@@ -110,17 +110,17 @@
 */
 
 // Color definitions
-#define	ILI9340_BLACK   0x0000
-#define	ILI9340_BLUE    0x001F
-#define	ILI9340_RED     0xF800
-#define	ILI9340_GREEN   0x07E0
-#define ILI9340_CYAN    0x07FF
-#define ILI9340_MAGENTA 0xF81F
-#define ILI9340_YELLOW  0xFFE0
-#define ILI9340_WHITE   0xFFFF
+#define	BLACK   0x0000
+#define	BLUE    0x001F
+#define	RED     0xF800
+#define	GREEN   0x07E0
+#define CYAN    0x07FF
+#define MAGENTA 0xF81F
+#define YELLOW  0xFFE0
+#define WHITE   0xFFFF
 
 #define PBCLK 40000000 // peripheral bus clock
-#define SPI_freq    20000000
+#define SPI_freq    5000000//20M
 
 #define tabspace 4 // number of spaces for a tab
 
