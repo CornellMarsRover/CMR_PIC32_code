@@ -1,0 +1,19 @@
+build/default/production/_ext/1472/MCU1.o:  \
+../MCU1.c  \
+../config.h  \
+ ../pt_cornell_1_2.h  \
+../tft_gfx.h  \
+../tft_master.h  \
+../SD_Card.h  \
+ ../MDD_includes/FSIO.h  \
+../MDD_includes/../PIC32/FSconfig.h  \
+ ../MDD_includes/../PIC32/../PIC32/Compiler.h  \
+ ../MDD_includes/../PIC32/../PIC32/HardwareProfile.h  \
+ ../MDD_includes/../MDD_includes/FSDefs.h  \
+ ../MDD_includes/../MDD_includes/SD-SPI.h  \
+ ../MDD_includes/../MDD_includes/../PIC32/FSconfig.h  \
+ ../MDD_includes/../MDD_includes/../PIC32/../PIC32/Compiler.h  \
+ ../MDD_includes/../MDD_includes/../PIC32/../PIC32/HardwareProfile.h  \
+ ../MDD_includes/../MDD_includes/../MDD_includes/FSDefs.h  \
+../PWM_logic.h  \
+ ../I2C_Reg_defs.h 
