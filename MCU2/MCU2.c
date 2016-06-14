@@ -33,11 +33,7 @@ static int IntThresh = 0;
 
 static char I2CDataIn;
 static unsigned char byteReceved;
-<<<<<<< HEAD
 static unsigned char config1 = 0x0E;
-=======
-static unsigned char config1 = 0x8E;
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
 static unsigned char Status1 = 0xFF;
 static int RF_PWM;
 static int RF_P = 23;
@@ -855,11 +851,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     config1 = I2CDataIn;
                     break;
                 case ADDR_LATCH:
-<<<<<<< HEAD
                     if(I2CDataIn){
-=======
-                    if(I2CDataIn==0xFF){
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
                         mPORTBSetBits(BIT_10);
                     }
                     else{

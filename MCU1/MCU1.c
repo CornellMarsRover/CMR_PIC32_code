@@ -34,11 +34,7 @@ char buffer[60]; // string buffer
 
 static char I2CDataIn;
 static int byteReceved;
-<<<<<<< HEAD
 static int config1 = 0x0E;
-=======
-static int config1 = 0x8E;
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
 static int Status1 = 0xFF;
 static int LF_PWM;
 static int LF_P = 23;
@@ -884,15 +880,11 @@ void __ISR(_TIMER_1_VECTOR, ipl1) WatchdogInt(void)
             LF_PWM = 0;
         }
         else{
-<<<<<<< HEAD
+
             LM_effort = 2250;
             LB_effort = 2250;
             LF_effort = 2250;
-=======
-            LM_effort = 0;
-            LB_effort = 0;
-            LF_effort = 0;
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
+
         }
     }
     mT1ClearIntFlag();  

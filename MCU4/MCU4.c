@@ -437,11 +437,8 @@ void main(void) {
 
     //round robin thread schedule
     while (1) {
-<<<<<<< HEAD
+
 //        PT_SCHEDULE(protothread_CSense(&pt_CSense));
-=======
-        PT_SCHEDULE(protothread_CSense(&pt_CSense));
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
         I2C1CONbits.SCLREL = 1; // release the clock
     }
 } // main

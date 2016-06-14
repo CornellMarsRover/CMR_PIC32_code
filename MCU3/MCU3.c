@@ -26,11 +26,7 @@ char buffer[60]; // string buffer
 //static int speedTarget; // target fan speed
 
 
-<<<<<<< HEAD
 #define I2CBAUD 10000 //clock operating at 10kHz
-=======
-#define I2CBAUD 20000 //clock operating at 10kHz
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
 #define BRG_VAL  ((PBCLK/2/I2CBAUD)-2)
 //#define I2CAddress 0x1E
 
@@ -78,7 +74,6 @@ static unsigned char servo2_ON;
 
 static struct pt pt_ADC, pt_CSense, pt_I2C;
 
-<<<<<<< HEAD
 
 void InitI2C2(void) {
     CloseI2C2();
@@ -86,8 +81,6 @@ void InitI2C2(void) {
 
 }
 
-=======
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
 static unsigned int rcv;
 float cels;
 static unsigned char addr = 0x5A;
@@ -112,10 +105,6 @@ void SendIMUData(int reg_addr, int data, char address) {
 
 int RcvIMUData(unsigned int reg_addr, char IMUAddress) {
     //	//see page 92 of https://www.adafruit.com/datasheets/BST_BNO055_DS000_12.pdf
-<<<<<<< HEAD
-=======
-
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
     rcv = 0;
     StartI2C2(); //Send line start condition
     IdleI2C2(); //Wait to complete
@@ -146,7 +135,7 @@ static int temp;
 
 static short IR_reading;
 
-<<<<<<< HEAD
+
 char checkI2CConnectivity(unsigned char Address) {
     char connected;
     StartI2C2(); //Send line start condition
@@ -165,29 +154,6 @@ char checkI2CConnectivity(unsigned char Address) {
 static PT_THREAD(protothread_I2C(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-//        if (checkI2CConnectivity(IRADD)) {
-//            IR_reading = RcvIRTemp();
-//            PT_YIELD_TIME_msec(100);
-//        }
-//        if (checkI2CConnectivity(IMUADD)) {
-            IMUData[0] = RcvIMUData(BNO055_QUATERNION_DATA_W_LSB_ADDR, IMUADD);
-            IMUData[1] = RcvIMUData(BNO055_QUATERNION_DATA_X_LSB_ADDR, IMUADD);
-            IMUData[2] = RcvIMUData(BNO055_QUATERNION_DATA_Y_LSB_ADDR, IMUADD);
-            IMUData[3] = RcvIMUData(BNO055_QUATERNION_DATA_Z_LSB_ADDR, IMUADD);
-            PT_YIELD_TIME_msec(50);
-//        }
-//        if(checkI2CConnectivity(IMUADD2)){
-            IMUData[4] = RcvIMUData(BNO055_QUATERNION_DATA_W_LSB_ADDR, IMUADD2);
-            IMUData[5] = RcvIMUData(BNO055_QUATERNION_DATA_X_LSB_ADDR, IMUADD2);
-            IMUData[6] = RcvIMUData(BNO055_QUATERNION_DATA_Y_LSB_ADDR, IMUADD2);
-            IMUData[7] = RcvIMUData(BNO055_QUATERNION_DATA_Z_LSB_ADDR, IMUADD2);
-            PT_YIELD_TIME_msec(50);
-//        }
-        PT_YIELD_TIME_msec(20);
-=======
-static PT_THREAD(protothread_I2C(struct pt *pt)) {
-    PT_BEGIN(pt);
-    while (1) {
         IR_reading = RcvIRTemp();
         PT_YIELD_TIME_msec(100);
 
@@ -202,7 +168,6 @@ static PT_THREAD(protothread_I2C(struct pt *pt)) {
         IMUData[7] = RcvIMUData(BNO055_QUATERNION_DATA_Z_LSB_ADDR, IMUADD2);
         PT_YIELD_TIME_msec(50);
 
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
     }
     PT_END(pt);
 }
@@ -213,30 +178,17 @@ static unsigned int MAG; //magnetic sensor
 static unsigned int POT1In;
 static unsigned int POT2In;
 static unsigned int MAGIn; //magnetic sensor
-<<<<<<< HEAD
 #define ADC_PERIOD 20
 #define ALPHA ((double)ADC_PERIOD)/500.0
 
-=======
-#define ALPHA ((double)ADC_PERIOD)/500.0
-#define ADC_PERIOD 5
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
 
 static PT_THREAD(protothread_ADC(struct pt *pt)) {
     PT_BEGIN(pt);
     while (1) {
-<<<<<<< HEAD
-        CloseI2C2();
-        MAG = (1.0 - ALPHA) * MAG + ALPHA * ReadADC10(0);
-        POT2 = (1.0 - ALPHA) * POT2 + ALPHA * ReadADC10(1);
-        POT1 = (1.0 - ALPHA) * POT1 + ALPHA * ReadADC10(2);
-        InitI2C2();
-=======
 
         MAG = (1 - ALPHA) * MAG + ALPHA * ReadADC10(0);
         POT2 = (1 - ALPHA) * POT2 + ALPHA * ReadADC10(1);
         POT1 = (1 - ALPHA) * POT1 + ALPHA * ReadADC10(2);
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
         PT_YIELD_TIME_msec(ADC_PERIOD);
     }
     PT_END(pt);
