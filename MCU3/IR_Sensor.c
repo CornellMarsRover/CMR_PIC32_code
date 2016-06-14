@@ -7,11 +7,7 @@ unsigned short RcvIRTemp(){
 	MasterWriteI2C2(IRADD<<1);	//Write slave addr WRITE (OR 0)
     IdleI2C2();
     MasterWriteI2C2(IR_READ_COMMAND); //command
-<<<<<<< HEAD
     //Command to read Tobj1 on ir sensor's ram: 000 = read ram; 0x07 = tobj1
-=======
-//    //Command to read Tobj1 on ir sensor's ram: 000 = read ram; 0x07 = tobj1
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
 	IdleI2C2();				//Wait to complete
     
     RestartI2C2();
@@ -24,20 +20,12 @@ unsigned short RcvIRTemp(){
     IdleI2C2();
     
     rcv |= MasterReadI2C2()<<8;		//Read in MSB
-<<<<<<< HEAD
     IdleI2C2();	        
-=======
-    IdleI2C1();	        
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
     AckI2C2();              //Acknowledge MSB
     IdleI2C2();
     
     MasterReadI2C2();		//Read in PEC
-<<<<<<< HEAD
     IdleI2C2();             
-=======
-    IdleI2C1();             
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
     AckI2C2();              //Acknowledge MSB
     IdleI2C2();
    

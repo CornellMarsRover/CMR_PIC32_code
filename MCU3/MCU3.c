@@ -294,11 +294,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
         } else if (I2Cstate == 1) {
             switch (I2C_request) {
                 case ADDR_M1_PWM:
-<<<<<<< HEAD
-                    M1_Dir = I2CDataIn >> 7 & 0x01; //take top bit                    
-=======
                     M1_Dir = I2CDataIn >> 7 & 0x01;//take top bit                    
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
                     if (((Status2 & M1_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
                         M1_PWM = 0;
                     } else {
@@ -315,11 +311,7 @@ void __ISR(_I2C_1_VECTOR, ipl3) _SlaveI2CHandler(void) {
                     SetDCOC1PWM(M1_PWM);
                     break;
                 case ADDR_M2_PWM:
-<<<<<<< HEAD
-                    M2_Dir = I2CDataIn >> 7 & 0x01; //take top bit
-=======
                     M2_Dir = I2CDataIn >> 7 & 0x01;//take top bit
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
                     if (((Status2 & M2_CUR) && (config1 & CUR_SENSE_EN)) || (config1 & MOTOR_HALT)) {
                         M2_PWM = 0;
                     } else {
@@ -494,14 +486,13 @@ void InitI2C(void) {
     EnableIntSI2C1;
 }
 
-<<<<<<< HEAD
-=======
 void InitI2C2(void) {
 
     OpenI2C2(I2C_EN | I2C_SLW_DIS | I2C_7BIT_ADD | I2C_SM_EN | I2C_RESTART_EN, BRG_VAL);
 
 }
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
+
+
 
 
 //== Servo ========================================================
@@ -543,8 +534,7 @@ inline void setWDT(void) {
 
 }
 
-<<<<<<< HEAD
-=======
+
 void __ISR(_TIMER_1_VECTOR, ipl1) WatchdogInt(void) {
     WDTCount++;
     if (WDTCount > 3) {//~1sec
@@ -556,7 +546,7 @@ void __ISR(_TIMER_1_VECTOR, ipl1) WatchdogInt(void) {
     }
     mT1ClearIntFlag();
 }
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
+
 
 // === Main  ======================================================
 
@@ -678,11 +668,7 @@ void main(void) {
 
     //round robin thread schedule
     PT_INIT(&pt_ADC);
-<<<<<<< HEAD
 //    PT_INIT(&pt_CSense);
-=======
-    PT_INIT(&pt_CSense);
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
     PT_INIT(&pt_I2C);
     unsigned int OPR_CODE = 0x3D;
     SendIMUData(OPR_CODE, 0x00, IMUADD); //sets IMU mode to CONFIG    
@@ -696,20 +682,11 @@ void main(void) {
     IMUData[0] = 1;
     IMUData[4] = 1;
     //    setWDT();
-<<<<<<< HEAD
 
     while (1) {
-        PT_SCHEDULE(protothread_I2C(&pt_I2C));
-        PT_SCHEDULE(protothread_ADC(&pt_ADC));
-        
-        //        PT_SCHEDULE(protothread_CSense(&pt_CSense));
-=======
-    while (1) {
         PT_SCHEDULE(protothread_ADC(&pt_ADC));
         PT_SCHEDULE(protothread_I2C(&pt_I2C));
-        PT_SCHEDULE(protothread_CSense(&pt_CSense));
-        //        PT_SCHEDULE(protothread_anim(&pt_anim));
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
+        //	PT_SCHEDULE(protothread_CSense(&pt_CSense));
         I2C1CONbits.SCLREL = 1; // release the clock
     }
 } // main

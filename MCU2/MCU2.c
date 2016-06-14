@@ -946,15 +946,9 @@ void __ISR(_TIMER_1_VECTOR, ipl1) WatchdogInt(void)
             RF_PWM = 0;
         }
         else{
-<<<<<<< HEAD
             RM_effort = 2250;
             RB_effort = 2250;
             RF_effort = 2250;
-=======
-            RM_effort = 0;
-            RB_effort = 0;
-            RF_effort = 0;
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
         }
     }
     mT1ClearIntFlag();  

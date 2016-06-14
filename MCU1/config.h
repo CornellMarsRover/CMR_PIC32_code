@@ -27,13 +27,9 @@
 //#define use_vref_debug
 
 // IF use_uart_serial IS defined, pin 21 and pin 22 are used by the uart
-<<<<<<< HEAD
-#define use_uart_serial
-#define BAUDRATE 9600 // must match PC terminal emulator setting
-=======
 //#define use_uart_serial
 //#define BAUDRATE 9600 // must match PC terminal emulator setting
->>>>>>> 0bf8f8db958bf40d6be8a98095a3e35310bfc7e7
+
 
 /////////////////////////////////
 // set up clock parameters
